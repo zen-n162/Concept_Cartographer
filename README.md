@@ -75,26 +75,24 @@ cd ~/Documents/QST/ConceptCartographer
 ./.venv/bin/python -m cc_orchestrator.chat "今週の研究を整理して" --target local
 ```
 
-- 資料の取込: Microsoft Graph (OneDrive/SharePoint) を試行 → 権限が無ければ
-  `inbox/`・`--path`・`$CC_INBOX_DIRS` のローカルフォルダへ自動フォールバック。
-  期間は依頼文から解釈 (今週/先週/今月/直近N日)。
-- エージェント (Foundry プロジェクト `qst-cartographer-poc` に登録済み):
-  | agent | model | 役割 |
-  |---|---|---|
-  | cc-extraction | gpt-5.6-sol | 資料 → knowledge_graph 抽出 |
-  | cc-layout | gpt-5.6-luna | compute_layout ツールで layout_plan 化 |
-  | cc-projection | gpt-5.6-luna | render_layout_plan ツールで描画 |
-  | cc-verification | gpt-5.6-terra | verify_scene ツールで独立検証 |
+- **資料の取込 (Work IQ)**: Foundry の Remote MCP 接続 `WorkIQOneDrive` /
+  `WorkIQSharePoint` / `WorkIQCopilot` 経由で、あなた (nakamura.zen@qst.go.jp) の
+  OneDrive・SharePoint を **Foundry 側で直接読む**。期間は依頼文から解釈
+  (今週/先週/今月/直近N日)。`inbox/` や `--path` にファイルを置けば補助入力として併用、
+  `--local-only` で Work IQ を無効化。
+- **エージェント** (Foundry `qst-cartographer-poc` の「エージェント」一覧に表示):
+  | agent | model | 役割 | ツール |
+  |---|---|---|---|
+  | cc-extraction | gpt-5.6-sol | 資料収集 + knowledge_graph 抽出 | Work IQ MCP ×3 |
+  | cc-layout | gpt-5.6-luna | compute_layout で layout_plan 化 | function ×2 |
+  | cc-projection | gpt-5.6-luna | render_layout_plan で描画 | function ×1 |
+  | cc-verification | gpt-5.6-terra | verify_scene で独立検証 | function ×2 |
+- **API の別**: 新 Foundry の `/agents` (kind: prompt, Responses API) を使う。
+  旧 `/assistants` (クラシック アシスタント) に作るとポータルの一覧に出ず、
+  gpt-5.6 系も temperature/top_p 非互換で実行できない。
 - 描画先: `--target vm` (既定) は **VM-Excalidraw-MCP** (<VM の private IP>, systemd 常駐の
   canvas:3000 + gateway:8000) へ `az vm run-command` 中継で描画し、ローカル
   (127.0.0.1:3000) にも同一シーンをミラーする。ネットワーク公開はゼロのまま。
-- 既知の制約:
-  - Agent Service ランタイムが gpt-5.6 系/5.5 の run を `top_p` 非互換で拒否する
-    (gpt-5 / gpt-5.4-mini は可)。検出時は同一デプロイの Chat Completions へ自動
-    フォールバック (エージェント定義・instructions・ツールは同一)。
-  - このアカウントは OneDrive 未プロビジョニング + Sites.Read 権限なしのため
-    Graph 取込は現状スキップされる (コードは実装済み。IT 部門への依頼事項:
-    OneDrive 有効化、または Files.Read.All/Sites.Read.All を持つアプリ登録)。
 - VM 側デプロイ更新: `./scripts/vm_deploy_app.sh` (cc_core+vmexec を run-command で配布)
 
 ## 論文 PDF から概念図を作る（手動パス）

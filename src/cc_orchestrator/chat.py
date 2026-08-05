@@ -23,7 +23,7 @@ import argparse
 import json
 import sys
 
-from cc_orchestrator.foundry_agents import FoundryAgents
+from cc_orchestrator.foundry_v2 import FoundryAgentsV2
 from cc_orchestrator.pipeline import ensure_agents, run_pipeline
 
 
@@ -33,12 +33,15 @@ def _print_summary(s: dict) -> None:
         print(f"⚠ {s['hint']}")
         return
     ing = s.get("ingest", {})
-    if "files" in ing:
-        print(f"📄 取込 ({ing.get('window')}): {len(ing['files'])} 件")
-        for f in ing["files"]:
-            print(f"   - {f['name']}  [{f['source']}, {f['modified']}]")
+    if "window" in ing:
+        wq = "Work IQ 有効" if ing.get("workiq") == "enabled" else "ローカルのみ"
+        print(f"📄 取込 ({ing.get('window')} / {wq})")
+        for f in ing.get("local_files", []):
+            print(f"   - {f['name']}  [local, {f['modified']}]")
     kgs = s.get("knowledge_graph", {})
     if kgs:
+        for sf in kgs.get("source_files", []):
+            print(f"   - {sf}  [Work IQ]")
         print(f"🧠 抽出: 概念 {kgs.get('nodes')} / 関係 {kgs.get('edges')}"
               f" / 島 {kgs.get('communities')}  → {kgs.get('saved')}")
     lay = s.get("layout", {})
@@ -64,20 +67,22 @@ def main() -> None:
     ap.add_argument("--path", action="append", default=[],
                     help="資料フォルダ (複数可)。OneDrive/SharePoint 同期フォルダも可")
     ap.add_argument("--kg", default=None, help="抽出をスキップし knowledge_graph JSON を使用")
+    ap.add_argument("--local-only", action="store_true",
+                    help="Work IQ を使わずローカル資料のみで抽出")
     ap.add_argument("--setup-agents", action="store_true",
                     help="Foundry に 4 エージェントを登録/更新して終了")
     args = ap.parse_args()
 
     if args.setup_agents:
-        ids = ensure_agents(FoundryAgents())
-        print(json.dumps(ids, indent=2))
+        names = ensure_agents(FoundryAgentsV2())
+        print(json.dumps(names, indent=2, ensure_ascii=False))
         return
 
     def run_once(message: str) -> None:
         print(f"⏳ 実行中 (target={args.target})… VM 描画は数分かかります")
         try:
-            summary = run_pipeline(message, target=args.target,
-                                   paths=args.path, kg_file=args.kg)
+            summary = run_pipeline(message, target=args.target, paths=args.path,
+                                   kg_file=args.kg, local_only=args.local_only)
         except Exception as exc:
             print(f"❌ 失敗: {type(exc).__name__}: {exc}", file=sys.stderr)
             return
