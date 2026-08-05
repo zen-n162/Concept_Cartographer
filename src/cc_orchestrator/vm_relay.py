@@ -25,6 +25,22 @@ VMEXEC = "sudo -u azureuser /opt/cartographer/venv/bin/python /opt/cartographer/
 CONFLICT_MARK = "Run command extension execution is in progress"
 
 
+def agent_health() -> tuple[bool, str]:
+    """VM ゲストエージェント (waagent) の健全性を返す。
+
+    run-command はゲストエージェントが実行する。エージェントが応答不能だと
+    実行中のコマンドが完了扱いにならず排他ロックが解放されないため、以後
+    すべての run-command が Conflict になる。待っても直らないので区別する。
+    """
+    proc = subprocess.run(
+        ["az", "vm", "get-instance-view", "-g", RG, "-n", VM,
+         "--query", "instanceView.vmAgent.statuses[0].displayStatus", "-o", "tsv"],
+        capture_output=True, text=True, timeout=120,
+    )
+    status = proc.stdout.strip()
+    return (status == "Ready", status or "Unknown")
+
+
 def _invoke(script: str, timeout_s: int = 900,
             conflict_retries: int = 12, conflict_wait_s: float = 20.0) -> str:
     """VM 上でスクリプトを実行する。
@@ -42,11 +58,22 @@ def _invoke(script: str, timeout_s: int = 900,
         if proc.returncode == 0:
             return proc.stdout
         err = proc.stderr.strip()
-        if CONFLICT_MARK in err and attempt < conflict_retries:
-            logger.info("vm run-command busy; waiting %.0fs (%d/%d)",
-                        conflict_wait_s, attempt + 1, conflict_retries)
-            time.sleep(conflict_wait_s)
-            continue
+        if CONFLICT_MARK in err:
+            # 待って直る競合か、エージェント故障かを最初の Conflict で切り分ける
+            if attempt == 0:
+                healthy, status = agent_health()
+                if not healthy:
+                    raise RuntimeError(
+                        f"VM のゲストエージェントが応答していません (status={status})。"
+                        "run-command はエージェントが実行するため、待っても解放されません。"
+                        "VM を再起動して復旧してください:\n"
+                        f"  az vm restart -g {RG} -n {VM}\n"
+                        "復旧までは --target local でローカル描画できます。")
+            if attempt < conflict_retries:
+                logger.info("vm run-command busy; waiting %.0fs (%d/%d)",
+                            conflict_wait_s, attempt + 1, conflict_retries)
+                time.sleep(conflict_wait_s)
+                continue
         raise RuntimeError(f"run-command failed: {err[:300]}")
     raise RuntimeError("run-command stayed busy; VM 側の実行が終わるのを待って再試行してください")
 
