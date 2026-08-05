@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qst.internal/concept-cartographer/layout_plan.schema.json",
+  "title": "Concept Cartographer layout_plan",
+  "description": "Excalidraw MCP への中間契約 (引き継ぎメモ §9 準拠)。knowledge_graph を直接渡さず、必ずこの layout_plan を経由する。",
+  "type": "object",
+  "required": ["nodes", "edges", "islands", "provenance"],
+  "additionalProperties": false,
+  "properties": {
+    "detail_level": {
+      "type": "string",
+      "enum": ["overview", "standard", "detailed"],
+      "default": "standard"
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "x", "y", "size", "community_id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "size": { "type": "number", "exclusiveMinimum": 0 },
+          "community_id": { "type": "string", "minLength": 1 },
+          "style": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rough": { "type": "boolean", "default": true },
+              "backgroundColor": { "type": "string" },
+              "strokeColor": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "from", "to", "glyph"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "from": { "type": "string", "minLength": 1 },
+          "to": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "glyph": {
+            "type": "string",
+            "enum": ["arrow", "wave", "zigzag", "double", "hole"],
+            "description": "arrow=因果 / wave=相関 / zigzag=矛盾 / double=補強 / hole=ギャップ候補(破線+半透明で描画し確定事項としない)"
+          }
+        }
+      }
+    },
+    "islands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["community_id", "name", "bbox"],
+        "additionalProperties": false,
+        "properties": {
+          "community_id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "bbox": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[x_min, y_min, x_max, y_max]"
+          },
+          "is_gap": { "type": "boolean", "default": false }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["graph_version", "generated_for"],
+      "additionalProperties": true,
+      "properties": {
+        "graph_version": { "type": "string", "minLength": 1 },
+        "generated_for": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

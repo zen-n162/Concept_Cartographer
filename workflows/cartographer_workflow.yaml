@@ -1,0 +1,94 @@
+# Concept Cartographer — マルチエージェント・ワークフロー定義
+#
+# Foundry Agent Service の Workflows (宣言的オーケストレーション, preview) 用。
+# Foundry Toolkit / Portal のワークフローデザイナに合わせて import・調整する。
+# 順序はワークフローで固定し、connected-agents の LLM 委譲判断に任せない。
+#
+#   input(text | knowledge_graph)
+#     -> extraction (KG が入力ならスキップ)
+#     -> layout -> projection -> verification
+#     -> FAIL なら projection を 1 回だけ再試行 -> 最終レポート
+#
+# 中間契約: layout_plan.json (schemas/layout_plan.schema.json)
+
+name: cartographer-workflow
+description: text/KG -> knowledge_graph -> layout_plan -> Excalidraw 描画 -> 検証
+
+inputs:
+  request:
+    type: string
+    description: 研究テキスト、または knowledge_graph JSON 文字列
+
+variables:
+  knowledge_graph: null
+  layout_plan: null
+  render_result: null
+  verify_report: null
+  retried: false
+
+states:
+  - id: route_input
+    description: 入力が JSON (knowledge_graph) か生テキストかを判定する分岐
+    transitions:
+      - condition: input.request is valid knowledge_graph JSON
+        set: { knowledge_graph: input.request }
+        next: layout
+      - condition: otherwise
+        next: extract
+
+  - id: extract
+    agent: extraction-agent
+    input: input.request
+    output: knowledge_graph
+    on_error: fail_report
+    next: layout
+
+  - id: layout
+    agent: layout-agent
+    input: variables.knowledge_graph
+    output: layout_plan
+    transitions:
+      - condition: output starts with "LAYOUT_FAILED"
+        next: fail_report
+      - condition: otherwise
+        next: project
+
+  - id: project
+    agent: projection-agent
+    input: variables.layout_plan
+    output: render_result
+    transitions:
+      - condition: render_result.success == false
+        next: fail_report
+      - condition: otherwise
+        next: verify
+
+  - id: verify
+    agent: verification-agent
+    input: variables.layout_plan
+    output: verify_report
+    transitions:
+      - condition: verify_report.verdict == "PASS"
+        next: done
+      - condition: verify_report.verdict == "FAIL" && variables.retried == false
+        set: { retried: true }
+        next: project           # 再描画は 1 回のみ
+      - condition: otherwise
+        next: fail_report
+
+  - id: done
+    type: final
+    output:
+      status: success
+      layout_plan: variables.layout_plan
+      element_map: variables.render_result.element_map
+      verify_report: variables.verify_report
+
+  - id: fail_report
+    type: final
+    output:
+      status: failed
+      knowledge_graph: variables.knowledge_graph
+      layout_plan: variables.layout_plan
+      render_result: variables.render_result
+      verify_report: variables.verify_report

@@ -1,0 +1,30 @@
+[project]
+name = "concept-cartographer"
+version = "0.1.0"
+description = "Concept Cartographer PoC: layout_plan -> Excalidraw MCP projection pipeline + Foundry agent tools"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.21",
+    "mcp>=1.9,<2",  # 2.0 は API 再編 + cryptography 依存 (x86_64 wheel が壊れている) のため 1.x に固定
+    "anyio>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "e2e: requires local canvas server (127.0.0.1:3000) and streamable HTTP gateway (127.0.0.1:8000/mcp)",
+]
