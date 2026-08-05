@@ -61,6 +61,19 @@ Docker でローカル結合 (ACA と同じトポロジ):
 docker compose -f infra/docker/compose.local.yml up --build
 ```
 
+## Foundry ポータル（Web）から実行する
+
+ブラウザだけで完結する版。Foundry ポータル → プロジェクト `qst-cartographer-poc`
+→ エージェント → **`cc-cartographer-portal`** を開き、
+「今週の研究を概念地図として整理して」と入力すると `.excalidraw` が添付で返る。
+
+Work IQ で資料収集 → `code_interpreter` で作図まで **Foundry 内で完結**するため、
+手元のツール実行役が不要。詳細と制約は [docs/foundry-portal-usage.md](docs/foundry-portal-usage.md)。
+
+```bash
+./.venv/bin/python -m cc_orchestrator.portal_agent   # 登録/更新
+```
+
 ## チャットで概念地図を作る（Foundry + VM-Excalidraw-MCP / 稼働確認済み）
 
 ```bash
