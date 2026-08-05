@@ -24,6 +24,18 @@ from cc_core.mcp_client import ExcalidrawClient
 logger = get_logger("cc_core.verify")
 
 
+def _normalize_label(text: str | None) -> str:
+    """比較用にラベルを正規化する。
+
+    キャンバスにブラウザが接続していると、フロントエンドが表示幅に合わせて
+    ラベルへ改行を挿入する ("研究情報の散在" → "研究情報の\\n散在")。これは
+    表示上の折り返しであって内容の相違ではないため、空白・改行を落として比べる。
+    """
+    if not text:
+        return ""
+    return "".join(text.split())
+
+
 def _element_label(el: dict[str, Any],
                    texts_by_container: dict[str, str] | None = None) -> str | None:
     """要素のラベルを取り出す。
@@ -77,7 +89,7 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
         el = by_id.get(node_element_id(node["id"]))
         if el is not None:
             actual = _element_label(el, texts_by_container)
-            if actual != node["label"]:
+            if _normalize_label(actual) != _normalize_label(node["label"]):
                 label_mismatches.append(
                     {
                         "element": node_element_id(node["id"]),
@@ -91,7 +103,7 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
             prefix = GLYPH_STYLES[edge["glyph"]]["label_prefix"]
             expected = f"{prefix}{edge.get('label', '')}".strip()
             actual = _element_label(el, texts_by_container)
-            if expected and actual != expected:
+            if expected and _normalize_label(actual) != _normalize_label(expected):
                 label_mismatches.append(
                     {
                         "element": edge_element_id(edge["id"]),

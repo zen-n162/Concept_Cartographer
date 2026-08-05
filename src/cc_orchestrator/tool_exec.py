@@ -53,14 +53,44 @@ class ToolExecutor:
         self.last_plan = plan
         return plan
 
+    @staticmethod
+    def _looks_like_plan(obj: Any) -> bool:
+        """layout_plan か否か (knowledge_graph と取り違えられても気づけるように)。"""
+        return (isinstance(obj, dict) and "islands" in obj and "nodes" in obj
+                and isinstance(obj.get("nodes"), list) and obj["nodes"]
+                and "x" in obj["nodes"][0])
+
     def tool_validate_layout_plan(self, args: dict) -> dict:
-        plan = _as_dict(args["plan"])
-        self.last_plan = plan
+        """layout_plan を検証する。
+
+        エージェントが knowledge_graph を渡してくることがあるため、layout_plan で
+        なければ直前の compute_layout 結果を検証する。また **last_plan を上書き
+        しない** — 描画対象は compute_layout / render が決めた物を正とする。
+        """
+        passed = _as_dict(args["plan"]) if args.get("plan") is not None else None
+        if self._looks_like_plan(passed):
+            plan = passed
+        elif self.last_plan is not None:
+            logger.info("validate: layout_plan 以外が渡されたため直前の計算結果を検証")
+            plan = self.last_plan
+        else:
+            return {"valid": False,
+                    "errors": ["先に compute_layout を呼んで layout_plan を作ってください"],
+                    "warnings": []}
         return validate.validate_layout_plan(plan).to_dict()
 
     # -- 描画系 --
     def tool_render_layout_plan(self, args: dict) -> dict:
-        plan = _as_dict(args["plan"])
+        passed = _as_dict(args["plan"]) if args.get("plan") is not None else None
+        # 描画対象も取り違えを防ぐ (KG を渡されたら直前の layout_plan を描く)
+        if self._looks_like_plan(passed):
+            plan = passed
+        elif self.last_plan is not None:
+            logger.info("render: layout_plan 以外が渡されたため直前の計算結果を描画")
+            plan = self.last_plan
+        else:
+            return {"success": False,
+                    "errors": ["先に compute_layout を呼んで layout_plan を作ってください"]}
         self.last_plan = plan
         if self.target == "vm":
             result = vm_relay.vm_call("render", plan)

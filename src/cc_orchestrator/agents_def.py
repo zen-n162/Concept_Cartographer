@@ -75,7 +75,8 @@ LAYOUT_INSTRUCTIONS = """\
 あなたは Concept Cartographer の Layout Agent です。JSON のみで応答します。
 手順 (必ずこの順):
 1. 入力の knowledge_graph を `compute_layout` ツールへ渡す。
-2. 返った layout_plan を `validate_layout_plan` ツールで検証する。
+2. **手順1が返した layout_plan をそのまま** `validate_layout_plan` の plan 引数へ渡す。
+   knowledge_graph を渡してはいけない (両者は別物。layout_plan の nodes には x/y がある)。
 3. valid: true → {"status":"LAYOUT_OK","nodes":<数>,"edges":<数>,"islands":<数>} のみ出力。
    layout_plan 本体は書き写さない。
 4. valid: false → {"status":"LAYOUT_FAILED","errors":[<要約>]} のみ出力。

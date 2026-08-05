@@ -83,3 +83,14 @@ def test_node_outside_bbox_is_warning(plan_min):
     result = validate_layout_plan(plan)
     assert result.valid  # warning, not error
     assert any("outside island" in w for w in result.warnings)
+
+
+# --- verify のラベル正規化 (2026-08-05 の偽陽性 FAIL 対策) ---
+
+def test_label_normalization_ignores_wrapping_newlines():
+    """ブラウザ接続時にフロントが挿入する折り返し改行を差分としない。"""
+    from cc_core.verify import _normalize_label
+    assert _normalize_label("研究情報の\n散在") == _normalize_label("研究情報の散在")
+    assert _normalize_label(" ⇒ 補強 ") == _normalize_label("⇒ 補強")
+    assert _normalize_label(None) == ""
+    assert _normalize_label("A") != _normalize_label("B")

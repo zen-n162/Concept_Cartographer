@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+import time
 from typing import Any
 
 from cc_core.logging_util import get_logger
@@ -21,16 +22,33 @@ VM = "VM-Excalidraw-MCP"
 VMEXEC = "sudo -u azureuser /opt/cartographer/venv/bin/python /opt/cartographer/app/vmexec.py"
 
 
-def _invoke(script: str, timeout_s: int = 600) -> str:
-    proc = subprocess.run(
-        ["az", "vm", "run-command", "invoke", "-g", RG, "-n", VM,
-         "--command-id", "RunShellScript", "--scripts", script,
-         "--query", "value[0].message", "-o", "tsv"],
-        capture_output=True, text=True, timeout=timeout_s,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"run-command failed: {proc.stderr.strip()[:300]}")
-    return proc.stdout
+CONFLICT_MARK = "Run command extension execution is in progress"
+
+
+def _invoke(script: str, timeout_s: int = 900,
+            conflict_retries: int = 12, conflict_wait_s: float = 20.0) -> str:
+    """VM 上でスクリプトを実行する。
+
+    az vm run-command は VM 単位で排他のため、直前の実行が残っていると Conflict に
+    なる。パイプライン全体を落とさずに解放を待って再試行する。
+    """
+    for attempt in range(conflict_retries + 1):
+        proc = subprocess.run(
+            ["az", "vm", "run-command", "invoke", "-g", RG, "-n", VM,
+             "--command-id", "RunShellScript", "--scripts", script,
+             "--query", "value[0].message", "-o", "tsv"],
+            capture_output=True, text=True, timeout=timeout_s,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+        err = proc.stderr.strip()
+        if CONFLICT_MARK in err and attempt < conflict_retries:
+            logger.info("vm run-command busy; waiting %.0fs (%d/%d)",
+                        conflict_wait_s, attempt + 1, conflict_retries)
+            time.sleep(conflict_wait_s)
+            continue
+        raise RuntimeError(f"run-command failed: {err[:300]}")
+    raise RuntimeError("run-command stayed busy; VM 側の実行が終わるのを待って再試行してください")
 
 
 def _extract_json_line(message: str) -> dict[str, Any]:
