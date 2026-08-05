@@ -43,6 +43,10 @@ python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m cc_core.render fixtures/layout_plan_min.json
 ./.venv/bin/python -m cc_core.render fixtures/layout_plan_gap.json   # ギャップ候補: 破線+半透明
 
+# 3') knowledge_graph から直接描画 (compute_layout を経由)
+./.venv/bin/python -m cc_core.render graphs/kg_s1290162_m3.json --from-kg \
+  --save-plan graphs/layout_plan_s1290162_m3.json
+
 # 4) テスト
 ./.venv/bin/pytest -m "not e2e"   # ユニット (サーバー不要)
 ./.venv/bin/pytest -m e2e         # E2E (canvas + gateway 起動時のみ)
@@ -56,6 +60,30 @@ Docker でローカル結合 (ACA と同じトポロジ):
 ```bash
 docker compose -f infra/docker/compose.local.yml up --build
 ```
+
+## 論文 PDF から概念図を作る（現在の手順）
+
+抽出 (PDF→knowledge_graph) は Foundry の extraction-agent が担当する設計だが、
+Foundry 未デプロイの間は **手動 or 対話型 LLM で knowledge_graph を作り**、描画以降は
+既存パイプラインをそのまま使う。
+
+```bash
+# 1) PDF からテキスト抽出 (出力はリポジトリ外へ。本文をコミットしない)
+pip install -e ".[ingest]"
+./.venv/bin/python scripts/extract_pdf_text.py s1290162_GT.pdf -o /tmp/thesis.txt
+
+# 2) テキストを extraction-agent の instructions (agents/extraction-agent.yaml) と共に
+#    LLM へ渡し、knowledge_graph JSON を得る → graphs/kg_<name>.json に保存
+
+# 3) 描画 + 検証 + エクスポート
+./.venv/bin/python -m cc_core.render graphs/kg_<name>.json --from-kg \
+  --save-plan graphs/layout_plan_<name>.json
+open http://127.0.0.1:3000    # ブラウザで概念図を確認・手描き編集
+```
+
+実例: `graphs/kg_s1290162_m3.json`（卒業論文「Unsupervised Segmentation and
+Preprocessing for Geological Mapping of HSI by M3」から抽出、20概念/21関係/6島、
+うち1島はギャップ候補）。`exports/kg_s1290162_m3.excalidraw` が生成済み。
 
 ## ACA デプロイ (M2)
 

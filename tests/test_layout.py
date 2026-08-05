@@ -39,11 +39,37 @@ def test_layout_preserves_edges_and_glyphs():
     assert glyphs == {"r001": "arrow", "r002": "hole"}
 
 
+def _no_overlap(a: list[float], b: list[float]) -> bool:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    return ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0
+
+
 def test_islands_do_not_overlap():
     plan = compute_layout(_kg())
     boxes = [i["bbox"] for i in plan["islands"]]
     for a in range(len(boxes)):
         for b in range(a + 1, len(boxes)):
-            ax0, _, ax1, _ = boxes[a]
-            bx0, _, bx1, _ = boxes[b]
-            assert ax1 <= bx0 or bx1 <= ax0  # laid out left-to-right
+            assert _no_overlap(boxes[a], boxes[b])
+
+
+def test_islands_wrap_into_grid_when_many_communities():
+    """島が多いとき横一列に伸びず、行を折り返して bbox が重ならないこと。"""
+    kg = {
+        "graph_version": "kg_many",
+        "nodes": [
+            {"id": f"c{i:03d}", "label": f"n{i}", "community_id": f"comm_{i % 6:02d}"}
+            for i in range(18)
+        ],
+        "edges": [],
+        "communities": [{"id": f"comm_{i:02d}", "name": f"island {i}"} for i in range(6)],
+    }
+    plan = compute_layout(kg)
+    boxes = [i["bbox"] for i in plan["islands"]]
+    assert len(boxes) == 6
+    for a in range(len(boxes)):
+        for b in range(a + 1, len(boxes)):
+            assert _no_overlap(boxes[a], boxes[b])
+    total_width = max(b[2] for b in boxes) - min(b[0] for b in boxes)
+    assert total_width < 3000, f"islands still laid out in one long row ({total_width}px)"
+    assert len({b[1] for b in boxes}) > 1, "expected more than one island row"

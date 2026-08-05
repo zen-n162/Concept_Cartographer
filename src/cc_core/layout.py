@@ -23,6 +23,7 @@ CELL_W = 260          # grid cell width inside an island
 CELL_H = 140          # grid cell height inside an island
 ISLAND_PAD = 60       # padding between island border and first node
 ISLAND_GAP_X = 120    # horizontal gap between islands
+ISLAND_GAP_Y = 120    # vertical gap between island rows
 ORIGIN_X = 60
 ORIGIN_Y = 80
 VALID_GLYPHS = {"arrow", "wave", "zigzag", "double", "hole"}
@@ -47,14 +48,26 @@ def compute_layout(kg: dict[str, Any], detail_level: str = "standard") -> dict[s
 
     nodes_out: list[dict[str, Any]] = []
     islands_out: list[dict[str, Any]] = []
-    cursor_x = ORIGIN_X
 
-    for cid, members in groups.items():
+    # Islands are arranged in a grid (not one long row): with many communities a
+    # single row grows to several thousand px and stops being readable.
+    islands_per_row = max(1, math.ceil(math.sqrt(len(groups))))
+    cursor_x = ORIGIN_X
+    cursor_y = ORIGIN_Y
+    row_height = 0
+
+    for island_idx, (cid, members) in enumerate(groups.items()):
+        if island_idx > 0 and island_idx % islands_per_row == 0:
+            cursor_x = ORIGIN_X
+            cursor_y += row_height + ISLAND_GAP_Y
+            row_height = 0
+
         cols = max(1, math.ceil(math.sqrt(len(members))))
         rows = math.ceil(len(members) / cols)
         width = 2 * ISLAND_PAD + cols * CELL_W
         height = 2 * ISLAND_PAD + rows * CELL_H
-        x0, y0 = cursor_x, ORIGIN_Y
+        x0, y0 = cursor_x, cursor_y
+        row_height = max(row_height, height)
 
         for idx, n in enumerate(members):
             col, row = idx % cols, idx // cols
@@ -80,6 +93,7 @@ def compute_layout(kg: dict[str, Any], detail_level: str = "standard") -> dict[s
             }
         )
         cursor_x += width + ISLAND_GAP_X
+
 
     edges_out: list[dict[str, Any]] = []
     for idx, e in enumerate(kg_edges):
