@@ -24,15 +24,35 @@ from cc_core.mcp_client import ExcalidrawClient
 logger = get_logger("cc_core.verify")
 
 
-def _element_label(el: dict[str, Any]) -> str | None:
+def _element_label(el: dict[str, Any],
+                   texts_by_container: dict[str, str] | None = None) -> str | None:
+    """要素のラベルを取り出す。
+
+    ブラウザがキャンバスに接続していると、フロントエンドが label を独立した
+    bound text 要素 (containerId=親要素) に変換して同期し返すため、親要素の
+    label/text フィールドは消える。その場合は containerId 経由で探す。
+    """
     if isinstance(el.get("label"), dict) and el["label"].get("text"):
         return el["label"]["text"]
-    return el.get("text")
+    if el.get("text"):
+        return el["text"]
+    if texts_by_container:
+        return texts_by_container.get(el["id"])
+    return None
+
+
+def _bound_texts(elements: list[dict[str, Any]]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for el in elements:
+        if el.get("type") == "text" and el.get("containerId") and el.get("text"):
+            out.setdefault(el["containerId"], el["text"])
+    return out
 
 
 async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[str, Any]:
     elements = await client.call_json("query_elements", {})
     by_id: dict[str, dict[str, Any]] = {el["id"]: el for el in elements}
+    texts_by_container = _bound_texts(elements)
 
     missing: list[str] = []
     label_mismatches: list[dict[str, str]] = []
@@ -56,7 +76,7 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
     for node in plan["nodes"]:
         el = by_id.get(node_element_id(node["id"]))
         if el is not None:
-            actual = _element_label(el)
+            actual = _element_label(el, texts_by_container)
             if actual != node["label"]:
                 label_mismatches.append(
                     {
@@ -70,7 +90,7 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
         if el is not None:
             prefix = GLYPH_STYLES[edge["glyph"]]["label_prefix"]
             expected = f"{prefix}{edge.get('label', '')}".strip()
-            actual = _element_label(el)
+            actual = _element_label(el, texts_by_container)
             if expected and actual != expected:
                 label_mismatches.append(
                     {

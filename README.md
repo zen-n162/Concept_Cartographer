@@ -61,7 +61,43 @@ Docker でローカル結合 (ACA と同じトポロジ):
 docker compose -f infra/docker/compose.local.yml up --build
 ```
 
-## 論文 PDF から概念図を作る（現在の手順）
+## チャットで概念地図を作る（Foundry + VM-Excalidraw-MCP / 稼働確認済み）
+
+```bash
+cd ~/Documents/QST/ConceptCartographer
+
+# 「今週の研究を概念地図として整理して」 (既定: VM で描画 + ローカルへミラー)
+./.venv/bin/python -m cc_orchestrator.chat "今週の研究を概念地図として整理して"
+
+# 対話モード / 資料フォルダ指定 / ローカル描画のみ (高速)
+./.venv/bin/python -m cc_orchestrator.chat
+./.venv/bin/python -m cc_orchestrator.chat "直近30日の研究を整理して" --path ~/Documents/研究ノート
+./.venv/bin/python -m cc_orchestrator.chat "今週の研究を整理して" --target local
+```
+
+- 資料の取込: Microsoft Graph (OneDrive/SharePoint) を試行 → 権限が無ければ
+  `inbox/`・`--path`・`$CC_INBOX_DIRS` のローカルフォルダへ自動フォールバック。
+  期間は依頼文から解釈 (今週/先週/今月/直近N日)。
+- エージェント (Foundry プロジェクト `qst-cartographer-poc` に登録済み):
+  | agent | model | 役割 |
+  |---|---|---|
+  | cc-extraction | gpt-5.6-sol | 資料 → knowledge_graph 抽出 |
+  | cc-layout | gpt-5.6-luna | compute_layout ツールで layout_plan 化 |
+  | cc-projection | gpt-5.6-luna | render_layout_plan ツールで描画 |
+  | cc-verification | gpt-5.6-terra | verify_scene ツールで独立検証 |
+- 描画先: `--target vm` (既定) は **VM-Excalidraw-MCP** (<VM の private IP>, systemd 常駐の
+  canvas:3000 + gateway:8000) へ `az vm run-command` 中継で描画し、ローカル
+  (127.0.0.1:3000) にも同一シーンをミラーする。ネットワーク公開はゼロのまま。
+- 既知の制約:
+  - Agent Service ランタイムが gpt-5.6 系/5.5 の run を `top_p` 非互換で拒否する
+    (gpt-5 / gpt-5.4-mini は可)。検出時は同一デプロイの Chat Completions へ自動
+    フォールバック (エージェント定義・instructions・ツールは同一)。
+  - このアカウントは OneDrive 未プロビジョニング + Sites.Read 権限なしのため
+    Graph 取込は現状スキップされる (コードは実装済み。IT 部門への依頼事項:
+    OneDrive 有効化、または Files.Read.All/Sites.Read.All を持つアプリ登録)。
+- VM 側デプロイ更新: `./scripts/vm_deploy_app.sh` (cc_core+vmexec を run-command で配布)
+
+## 論文 PDF から概念図を作る（手動パス）
 
 抽出 (PDF→knowledge_graph) は Foundry の extraction-agent が担当する設計だが、
 Foundry 未デプロイの間は **手動 or 対話型 LLM で knowledge_graph を作り**、描画以降は

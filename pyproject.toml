@@ -7,6 +7,8 @@ dependencies = [
     "jsonschema>=4.21",
     "mcp>=1.9,<2",  # 2.0 は API 再編 + cryptography 依存 (x86_64 wheel が壊れている) のため 1.x に固定
     "anyio>=4.0",
+    "httpx>=0.27",  # cc_orchestrator (Foundry REST / Graph)
+    "pypdf>=4.0",   # cc_orchestrator.ingest (PDF テキスト抽出)
 ]
 
 [project.optional-dependencies]
