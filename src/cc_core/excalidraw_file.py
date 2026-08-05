@@ -90,7 +90,7 @@ def build_scene(plan: dict[str, Any]) -> dict[str, Any]:
         nid = node_element_id(node["id"])
         tid = f"{nid}-text"
         w = node["size"]
-        h = max(60.0, node["size"] * NODE_HEIGHT_RATIO)
+        h = node.get("height", max(60.0, node["size"] * NODE_HEIGHT_RATIO))
         elements.append(_base(
             nid, "ellipse", node["x"], node["y"], w, h,
             strokeColor=style.get("strokeColor", "#1e1e1e"),
@@ -107,7 +107,7 @@ def build_scene(plan: dict[str, Any]) -> dict[str, Any]:
     # 3) edges (ノード中心を結ぶ矢印 + バインド)
     centers = {
         n["id"]: (n["x"] + n["size"] / 2,
-                  n["y"] + max(60.0, n["size"] * NODE_HEIGHT_RATIO) / 2)
+                  n["y"] + n.get("height", max(60.0, n["size"] * NODE_HEIGHT_RATIO)) / 2)
         for n in plan["nodes"]
     }
     by_id = {e["id"]: e for e in elements}

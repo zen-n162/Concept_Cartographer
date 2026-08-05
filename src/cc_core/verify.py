@@ -103,6 +103,12 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
             prefix = GLYPH_STYLES[edge["glyph"]]["label_prefix"]
             expected = f"{prefix}{edge.get('label', '')}".strip()
             actual = _element_label(el, texts_by_container)
+            if actual is None:
+                # 中点で他ノードに重なるラベルは、線に紐付けず独立テキストとして
+                # 退避させている (cc_core.overlap.resolve_label_offset)
+                offset_el = by_id.get(edge_element_id(edge["id"]) + "-label")
+                if offset_el is not None:
+                    actual = offset_el.get("text")
             if expected and _normalize_label(actual) != _normalize_label(expected):
                 label_mismatches.append(
                     {

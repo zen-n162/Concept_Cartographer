@@ -19,6 +19,7 @@ from typing import Any
 
 from cc_core.logging_util import get_logger, label_digest
 from cc_core.mcp_client import ExcalidrawClient, ToolCallError
+from cc_core.overlap import resolve_label_offset
 from cc_core.validate import validate_layout_plan
 
 logger = get_logger("cc_core.adapter")
@@ -48,6 +49,8 @@ GLYPH_STYLES: dict[str, dict[str, Any]] = {
 
 NODE_HEIGHT_RATIO = 0.55
 GAP_OPACITY = 40
+NODE_FONT_SIZE = 14   # cc_core.layout.NODE_FONT と一致させること
+EDGE_FONT_SIZE = 12   # cc_core.layout.EDGE_FONT と一致させること
 
 
 def island_element_id(community_id: str) -> str:
@@ -155,6 +158,7 @@ async def render_layout_plan(
         for node in plan["nodes"]:
             style = node.get("style", {})
             in_gap = node["community_id"] in gap_communities
+            node_h = node.get("height", max(60, node["size"] * NODE_HEIGHT_RATIO))
             await create(
                 node_element_id(node["id"]),
                 {
@@ -162,7 +166,7 @@ async def render_layout_plan(
                     "type": "ellipse",
                     "x": node["x"], "y": node["y"],
                     "width": node["size"],
-                    "height": max(60, node["size"] * NODE_HEIGHT_RATIO),
+                    "height": node_h,
                     "strokeColor": style.get("strokeColor", "#1e1e1e"),
                     "backgroundColor": style.get("backgroundColor", "#fff9db"),
                     "strokeStyle": "dashed" if in_gap else "solid",
@@ -170,11 +174,13 @@ async def render_layout_plan(
                     "roughness": 2 if style.get("rough", True) else 0,
                     "opacity": GAP_OPACITY if in_gap else 100,
                     "text": node["label"],
+                    "fontSize": NODE_FONT_SIZE,
                     "fontFamily": "hand",
                 },
             )
 
         # --- 3) edges ---
+        nodes_by_id = {n["id"]: n for n in plan["nodes"]}
         for edge in plan.get("edges", []):
             glyph = GLYPH_STYLES[edge["glyph"]]
             label = edge.get("label", "")
@@ -192,10 +198,33 @@ async def render_layout_plan(
             }
             if glyph["endArrowhead"]:
                 args["endArrowhead"] = glyph["endArrowhead"]
-            if label or glyph["label_prefix"]:
-                args["text"] = f"{glyph['label_prefix']}{label}".strip()
+
+            text = f"{glyph['label_prefix']}{label}".strip()
+            # 中点に置くと他ノードへ重なるエッジ (中間ノードを飛び越す線など) は
+            # ラベルを線に紐付けず、衝突しない位置へ独立テキストとして逃がす
+            offset = resolve_label_offset(edge, nodes_by_id) if text else None
+            if text and offset is None:
+                args["text"] = text
+                args["fontSize"] = EDGE_FONT_SIZE
                 args["fontFamily"] = "hand"
             await create(edge_element_id(edge["id"]), args)
+
+            if text and offset is not None:
+                cx, cy = offset
+                width = max(20.0, len(text) * EDGE_FONT_SIZE * 0.8)
+                await create(
+                    edge_element_id(edge["id"]) + "-label",
+                    {
+                        "id": edge_element_id(edge["id"]) + "-label",
+                        "type": "text",
+                        "x": cx - width / 2, "y": cy - EDGE_FONT_SIZE * 0.75,
+                        "text": text,
+                        "fontSize": EDGE_FONT_SIZE,
+                        "fontFamily": "hand",
+                        "strokeColor": glyph["strokeColor"],
+                        "opacity": glyph["opacity"],
+                    },
+                )
 
         result.success = True
         logger.info(

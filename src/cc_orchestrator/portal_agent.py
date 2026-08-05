@@ -26,9 +26,29 @@ MODEL = "gpt-5.6-sol"
 # code_interpreter に貼り付けさせる決定的スクリプト (cc_core.layout +
 # cc_core.excalidraw_file の規則をポータブルにまとめたもの)
 BUILDER_SCRIPT = r'''
-import json, math, zlib
-NODE_W, CELL_W, CELL_H, PAD, GAP_X, GAP_Y, OX, OY = 180, 260, 140, 60, 120, 120, 60, 80
-HR, GAP_OP, FONT = 0.55, 40, 1
+import json, math, zlib, unicodedata
+PAD, GAP_X, GAP_Y, OX, OY = 56, 120, 130, 60, 80
+NODE_FONT, EDGE_FONT, USABLE, LINE_H = 14, 12, 0.58, 1.25
+NW_MIN, NW_MAX, NH_MIN, COL_M, ROW_M = 170, 300, 66, 28, 34
+EDGE_MAX_EM, GAP_OP, FONT = 8.0, 40, 1
+PRE_EM = {"arrow":0.0,"wave":1.6,"zigzag":1.6,"double":1.6,"hole":1.6}
+def dw(s):  # 表示幅 (全角=1, 半角=0.55)
+    return sum(1.0 if unicodedata.east_asian_width(c) in "WFA" else 0.55 for c in s or "")
+def trunc(s, m):
+    if dw(s) <= m: return s
+    o, w = "", 0.0
+    for c in s:
+        cw = 1.0 if unicodedata.east_asian_width(c) in "WFA" else 0.55
+        if w + cw > m - 0.6: break
+        o += c; w += cw
+    return o + "…"
+def nsize(label):  # ラベルが収まる楕円の寸法
+    total = dw(label)
+    lines = 1 if total <= 12 else 2
+    tw, th = total/lines*NODE_FONT, lines*NODE_FONT*LINE_H
+    return round(min(NW_MAX, max(NW_MIN, tw/USABLE+24))), round(max(NH_MIN, th/USABLE+18))
+def elabel_px(label, glyph):
+    return 0.0 if not label else (dw(trunc(label,EDGE_MAX_EM))+PRE_EM.get(glyph,0.0))*EDGE_FONT+10
 G = {
  "arrow":  ("#c92a2a","solid",2,"arrow",100,""),
  "wave":   ("#1971c2","dotted",2,None,100,"〜 "),
@@ -51,29 +71,49 @@ def text(i,x,y,s,size=16,color="#1e1e1e",op=100,cont=None):
               "containerId":cont,"lineHeight":1.25,"baseline":size,"autoResize":True})
     return e
 def layout(kg, detail="standard"):
-    groups={}
+    groups = {}
     for n in kg["nodes"]: groups.setdefault(n.get("community_id","comm_default"),[]).append(n)
-    comms={c["id"]:c for c in kg.get("communities",[])}
-    per_row=max(1,math.ceil(math.sqrt(len(groups)))); cx,cy,rh=OX,OY,0
-    nodes,islands=[],[]
-    for idx,(cid,mem) in enumerate(groups.items()):
-        if idx and idx%per_row==0: cx,cy,rh=OX,cy+rh+GAP_Y,0
-        cols=max(1,math.ceil(math.sqrt(len(mem)))); rows=math.ceil(len(mem)/cols)
-        w,h=2*PAD+cols*CELL_W,2*PAD+rows*CELL_H; rh=max(rh,h)
-        for j,n in enumerate(mem):
-            nodes.append({"id":n["id"],"label":n["label"],"x":cx+PAD+(j%cols)*CELL_W,
-                          "y":cy+PAD+(j//cols)*CELL_H,"size":NODE_W,"community_id":cid,
-                          "style":{"rough":True}})
-        m=comms.get(cid,{})
+    comms = {c["id"]: c for c in kg.get("communities",[])}
+    edges = [{"id": e.get("id") or f"r{i+1:03d}", "from": e["from"], "to": e["to"],
+              "label": trunc(e.get("label",""), EDGE_MAX_EM),
+              "glyph": e["glyph"] if e.get("glyph") in G else "arrow"}
+             for i, e in enumerate(kg.get("edges",[]))]
+    sizes = {n["id"]: nsize(n["label"]) for n in kg["nodes"]}
+    per_row = max(1, math.ceil(math.sqrt(len(groups))))
+    cx, cy, rh = OX, OY, 0
+    nodes, islands = [], []
+    for gi, (cid, mem) in enumerate(groups.items()):
+        if gi and gi % per_row == 0: cx, cy, rh = OX, cy+rh+GAP_Y, 0
+        cols = max(1, math.ceil(math.sqrt(len(mem)))); rows = math.ceil(len(mem)/cols)
+        grid = {(i//cols, i%cols): n for i, n in enumerate(mem)}
+        mids = {n["id"] for n in mem}
+        colw = [max((sizes[grid[(r,c)]["id"]][0] for r in range(rows) if (r,c) in grid), default=NW_MIN) for c in range(cols)]
+        rowh = [max((sizes[grid[(r,c)]["id"]][1] for c in range(cols) if (r,c) in grid), default=NH_MIN) for r in range(rows)]
+        pos = {grid[k]["id"]: k for k in grid}
+        cgap = [COL_M]*max(1, cols-1); rgap = [ROW_M]*max(1, rows-1)
+        for e in edges:                        # スキマはエッジラベルの実幅から決める
+            if e["from"] not in mids or e["to"] not in mids: continue
+            (r1,c1), (r2,c2) = pos[e["from"]], pos[e["to"]]
+            w = elabel_px(e["label"], e["glyph"])
+            if r1 == r2 and abs(c1-c2) == 1: i = min(c1,c2); cgap[i] = max(cgap[i], w+COL_M)
+            elif c1 == c2 and abs(r1-r2) == 1: i = min(r1,r2); rgap[i] = max(rgap[i], EDGE_FONT*LINE_H+ROW_M)
+        colx, x = [], 0.0
+        for c in range(cols): colx.append(x); x += colw[c] + (cgap[c] if c < cols-1 else 0)
+        rowy, y = [], 0.0
+        for r in range(rows): rowy.append(y); y += rowh[r] + (rgap[r] if r < rows-1 else 0)
+        w, h = 2*PAD+x, 2*PAD+y; x0, y0 = cx, cy; rh = max(rh, h)
+        for (r,c), n in grid.items():
+            nw, nh = sizes[n["id"]]
+            nodes.append({"id":n["id"],"label":n["label"],
+                          "x":round(x0+PAD+colx[c]+(colw[c]-nw)/2),
+                          "y":round(y0+PAD+rowy[r]+(rowh[r]-nh)/2),
+                          "size":nw,"height":nh,"community_id":cid,"style":{"rough":True}})
+        m = comms.get(cid, {})
         islands.append({"community_id":cid,"name":m.get("name",cid),
-                        "bbox":[cx,cy,cx+w,cy+h],"is_gap":bool(m.get("is_gap",False))})
-        cx+=w+GAP_X
-    edges=[{"id":e.get("id") or f"r{i+1:03d}","from":e["from"],"to":e["to"],
-            "label":e.get("label",""),"glyph":e["glyph"] if e.get("glyph") in G else "arrow"}
-           for i,e in enumerate(kg.get("edges",[]))]
+                        "bbox":[x0,y0,round(x0+w),round(y0+h)],"is_gap":bool(m.get("is_gap",False))})
+        cx += w + GAP_X
     return {"detail_level":detail,"nodes":nodes,"edges":edges,"islands":islands,
-            "provenance":{"graph_version":kg.get("graph_version","kg"),
-                          "generated_for":"foundry_portal"}}
+            "provenance":{"graph_version":kg.get("graph_version","kg"),"generated_for":"foundry_portal"}}
 def validate(p):
     err=[]; ids=[n["id"] for n in p["nodes"]]
     if len(ids)!=len(set(ids)): err.append("duplicate node id")
@@ -96,14 +136,14 @@ def build(p):
                         ("❓ " if g else "")+i["name"],16,c,op))
     for n in p["nodes"]:
         ing=n["community_id"] in gaps; nid=f"node-{n['id']}"; tid=nid+"-text"
-        w=n["size"]; h=max(60,n["size"]*HR)
+        w=n["size"]; h=n.get("height", max(NH_MIN, n["size"]*0.55))
         els.append(base(nid,"ellipse",n["x"],n["y"],w,h,backgroundColor="#fff9db",
                         strokeStyle="dashed" if ing else "solid",
                         opacity=GAP_OP if ing else 100,
                         boundElements=[{"id":tid,"type":"text"}]))
         t=text(tid,n["x"]+8,n["y"]+h/2-10,n["label"],14,"#1e1e1e",GAP_OP if ing else 100,nid)
         t["width"]=w-16; els.append(t)
-    ctr={n["id"]:(n["x"]+n["size"]/2,n["y"]+max(60,n["size"]*HR)/2) for n in p["nodes"]}
+    ctr={n["id"]:(n["x"]+n["size"]/2,n["y"]+n.get("height",max(NH_MIN,n["size"]*0.55))/2) for n in p["nodes"]}
     by={e["id"]:e for e in els}
     for e in p["edges"]:
         col,ss,sw,ah,op,pre=G[e["glyph"]]; eid=f"edge-{e['id']}"
@@ -117,7 +157,7 @@ def build(p):
         lab=(pre+e.get("label","")).strip()
         if lab: a["boundElements"]=[{"id":eid+"-text","type":"text"}]
         els.append(a)
-        if lab: els.append(text(eid+"-text",(sx+ex)/2,(sy+ey)/2,lab,12,col,op,eid))
+        if lab: els.append(text(eid+"-text",(sx+ex)/2,(sy+ey)/2,lab,EDGE_FONT,col,op,eid))
         for ep in (e["from"],e["to"]):
             if f"node-{ep}" in by: by[f"node-{ep}"]["boundElements"].append({"id":eid,"type":"arrow"})
     return {"type":"excalidraw","version":2,"source":"concept-cartographer",
