@@ -70,9 +70,9 @@ button:disabled { cursor:default; }
 }
 .logo { display:flex; align-items:center; gap:9px; margin:0 2px 16px; }
 .logo-mark {
-  width:28px; height:28px; border-radius:8px; background:var(--indigo-900);
-  display:flex; align-items:center; justify-content:center; color:var(--indigo-200);
-  flex:0 0 auto;
+  /* 透過 PNG のブランドマーク (コンパス+概念グラフ)。サイドバーの
+     明るい地にそのまま載せる — 箱で囲うとコンパスの尖りが窮屈になる */
+  width:34px; height:34px; object-fit:contain; flex:0 0 auto;
 }
 .logo-text { font-size:13.5px; font-weight:500; line-height:1.25; color:var(--indigo-900); }
 
