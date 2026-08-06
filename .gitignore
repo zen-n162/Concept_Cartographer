@@ -32,6 +32,7 @@ node_modules/
 my-mcp-server/
 *.pdf
 *.pptx
+run.txt
 
 # --- OS / editor ---
 .DS_Store
