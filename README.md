@@ -14,10 +14,11 @@ ConceptCartographer/
 │   ├── README.md            ← PoC の使い方・構成・実測結果
 │   ├── src/ tests/ …        ← 実装一式（テスト32件 pass）
 │   └── docs/                ← PoC 説明図・ポータル利用手順
-├── 詳細設計レポート.pdf / _v2 / _v3   ← 設計文書（v1〜v3）
-├── Concept_Cartographer_v4_核設計レポート.pdf
-├── CC_v4_impl_spec (1).pdf           ← v4 実装仕様書
-└── Excalidraw MCP引き継ぎメモ….md    ← PoC の一次基準だった引き継ぎメモ
+└── 設計文書/                 ← 設計 PDF 5 点 + 引き継ぎメモ（一次基準資料一式）
+    ├── Excalidraw MCP引き継ぎメモ….md
+    ├── 詳細設計レポート.pdf / _v2 / _v3
+    ├── Concept_Cartographer_v4_核設計レポート.pdf
+    └── CC_v4_impl_spec (1).pdf
 ```
 
 - **PoC を動かす**: `poc/README.md` の手順どおり（`cd poc` してから実行）。
