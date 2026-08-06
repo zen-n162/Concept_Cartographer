@@ -106,7 +106,8 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
         color = "#868e96" if is_gap else "#495057"
         op = GAP_OPACITY / 100 if is_gap else 1.0
         parts.append(
-            f'<g{grp}><rect x="{ix0 + ox:.0f}" y="{iy0 + oy:.0f}" '
+            f'<g data-island-id="{_esc(isl["community_id"])}"{grp}>'
+            f'<rect x="{ix0 + ox:.0f}" y="{iy0 + oy:.0f}" '
             f'width="{ix1 - ix0:.0f}" height="{iy1 - iy0:.0f}" rx="12" fill="none" '
             f'stroke="{color}" stroke-width="1" opacity="{op:.2f}"'
             f'{_dash("dashed" if is_gap else "solid", 1)}/></g>'
@@ -127,8 +128,13 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
         bx, by = b["x"] + b["size"] / 2 + ox, b["y"] + _node_h(b) / 2 + oy
         op = g["opacity"] / 100
         marker = f' marker-end="url(#ah-{edge["glyph"]})"' if g["endArrowhead"] else ""
+        # data-edge-id / class は Web UI のクリック委譲 (根拠ポップオーバー) 用。
+        # 線とラベルの両方に付ける — 細い線は当たり判定が小さく、実際には
+        # ラベルを押されることが多いため。
+        eid = f' data-edge-id="{_esc(edge["id"])}" class="cc-edge"'
         parts.append(
-            f'<g{grp}><line x1="{ax:.0f}" y1="{ay:.0f}" x2="{bx:.0f}" y2="{by:.0f}" '
+            f'<g{eid}{grp}><line x1="{ax:.0f}" y1="{ay:.0f}" x2="{bx:.0f}" '
+            f'y2="{by:.0f}" '
             f'stroke="{g["strokeColor"]}" stroke-width="{g["strokeWidth"]}" '
             f'opacity="{op:.2f}"{_dash(g["strokeStyle"], g["strokeWidth"])}{marker}/></g>'
         )
@@ -141,7 +147,7 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
         else:
             lx, ly = offset[0] + ox, offset[1] + oy
         parts.append(
-            f'<text x="{lx:.0f}" y="{ly:.0f}" font-size="{EDGE_FONT}" '
+            f'<text{eid} x="{lx:.0f}" y="{ly:.0f}" font-size="{EDGE_FONT}" '
             f'text-anchor="middle" fill="{g["strokeColor"]}" opacity="{op:.2f}" '
             f'paint-order="stroke" stroke="#ffffff" stroke-width="3" '
             f'stroke-linejoin="round">{_esc(label)}</text>'
@@ -159,8 +165,16 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
         stroke = style.get("strokeColor",
                            AGGREGATE_STROKE if is_agg else "#1e1e1e")
         op = GAP_OPACITY / 100 if in_gap else 1.0
+        # 集約ノードは Web UI で展開 (ドリルダウン) の対象になるため
+        # data-aggregate-id も付ける。ラベル文字にも同じ属性を付けるのは、
+        # 文字を押されたときにノードとして拾えるようにするため。
+        nid = (f' data-node-id="{_esc(node["id"])}" class="cc-node" '
+               f'data-kind="{"aggregate" if is_agg else "concept"}"')
+        if is_agg:
+            nid += f' data-aggregate-id="{_esc(node.get("aggregate_id", node["id"]))}"'
         parts.append(
-            f'<g{grp}><ellipse cx="{cx:.0f}" cy="{cy:.0f}" rx="{node["size"] / 2:.0f}" '
+            f'<g{nid}{grp}><ellipse cx="{cx:.0f}" cy="{cy:.0f}" '
+            f'rx="{node["size"] / 2:.0f}" '
             f'ry="{nh / 2:.0f}" fill="{fill}" stroke="{stroke}" stroke-width="1.4" '
             f'opacity="{op:.2f}"{_dash("dashed" if in_gap or is_agg else "solid", 1.4)}'
             f'/></g>'
@@ -171,7 +185,8 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
         start = cy - (len(lines) - 1) * NODE_FONT * 0.62
         for i, line in enumerate(lines):
             parts.append(
-                f'<text x="{cx:.0f}" y="{start + i * NODE_FONT * 1.25 + 5:.0f}" '
+                f'<text{nid} x="{cx:.0f}" '
+                f'y="{start + i * NODE_FONT * 1.25 + 5:.0f}" '
                 f'font-size="{NODE_FONT}" text-anchor="middle" fill="#1e1e1e" '
                 f'opacity="{op:.2f}">{_esc(line)}</text>'
             )

@@ -22,6 +22,11 @@ dev = [
 ingest = [
     "pypdf>=4.0",  # scripts/extract_pdf_text.py (PDF -> テキスト)
 ]
+web = [
+    "fastapi>=0.110",          # cc_web (ローカル Web アプリ)
+    "uvicorn>=0.27",           # ASGI サーバ (127.0.0.1 バインド専用)
+    "python-multipart>=0.0.9",  # inbox/ への資料アップロード (multipart/form-data)
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -29,6 +34,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Web UI の静的ファイルはパッケージの一部 (wheel でも同梱する)
+cc_web = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

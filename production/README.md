@@ -39,12 +39,63 @@ python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m cc_orchestrator.chat --gap-confirm gap-isolated-c003 --plan <plan.json>
 
 # テスト
-./.venv/bin/pytest -m "not e2e"      # 99 件
+./.venv/bin/pytest -m "not e2e"      # 153 件
 ```
 
 描画先は `--target local`（Excalidraw MCP）が既定。ACA 到達前は
 `--target file` で MCP なしに `.excalidraw` / SVG を生成でき、この経路でも
 可変詳細度と独立検証が成立する（計画 §3-2 の fallback 要件）。
+
+## Web アプリ（`docs/webapp-design.md`）
+
+CLI と同じパイプラインをブラウザから使うローカル Web アプリ。
+
+```bash
+cd production
+./.venv/bin/pip install -e ".[dev,web]"
+./scripts/start_web.sh          # 127.0.0.1:8090（0.0.0.0 では bind しない）
+open http://127.0.0.1:8090
+```
+
+```
+ブラウザ（vanilla HTML/CSS/JS・ビルド工程なし・CDN なし）
+  │ fetch（同一オリジン）
+FastAPI 127.0.0.1:8090          src/cc_web/
+  ├ JobManager（ThreadPoolExecutor max_workers=1 = 直列)
+  │    └ run_pipeline(..., progress=…)   ← 既存 cc_orchestrator
+  ├ セッション読取 graphs/layout_plan_session_*.json
+  └ SVG 生成 cc_core.detail.project → cc_core.svg_export.build_svg
+```
+
+画面の流れ:
+
+1. ホームでテンプレート 4 枚から選ぶ（またはそのまま依頼文を入力）→ 送信
+2. 進捗カード（経路判定 → 資料収集 → 概念抽出 → 関係の検証 → 詳細度の計算 →
+   ギャップ検出 → 描画 → 独立検証 → 出力）を 1.5 秒間隔でポーリング表示
+3. 完成後は結果カード: 概念数 / 関係数 / 島数 / 検証バッジ + 関係検証チップ
+   （因果を維持 n・相関へ降格 n・矛盾を非断定化 n）+ 地図・ギャップ・評価の 3 タブ
+4. ヘッダーの詳細度セグメントで Overview / Standard / Detailed を切替。
+   **切替は SVG の取り直しだけ**で LLM 呼び出しはゼロ（所要時間をトーストに表示）
+5. 地図をクリック: 集約ノード → 展開モーダル、関係の線 → 根拠の引用ポップオーバー
+   （正しい / 誤り / 判断不能の関係評価をその場で送信）
+6. ギャップタブで候補を [有用] [却下] で確定（確定済みは無効化・有用率を表示）
+
+主なエンドポイント（すべて JSON、SVG のみ `image/svg+xml`）:
+
+| Method / Path | 用途 |
+|---|---|
+| `GET /healthz` `/api/me` `/api/templates` | 稼働確認・アカウント（az CLI を 10 分キャッシュ）・テンプレ 4 件 |
+| `GET/POST /api/files` | `inbox/` の一覧とアップロード（pdf/docx/txt/md のみ・basename 化） |
+| `POST /api/jobs` → `GET /api/jobs/{id}` | 生成の投入（202）と進捗ポーリング |
+| `GET /api/sessions[/{s}[/svg\|/view\|/excalidraw]]` | セッション一覧・KPI・詳細度別 SVG（`exports/web/` にキャッシュ）・突合用 JSON・シーンのダウンロード |
+| `POST /api/sessions/{s}/gaps/{gid}` | ギャップ確定（再確定は 409） |
+| `POST /api/sessions/{s}/expand/{agg}` | 集約ノードの展開（未知は 404） |
+| `POST /api/sessions/{s}/evaluation` | 満足度 / 関係評価 / 操作ログ → `logs/evaluation.jsonl` |
+| `GET /api/history` | `logs/web_history.jsonl` の逆順 50 件 |
+
+`run_pipeline(..., offline=True)` は **Foundry を一切呼ばない**実行モード
+（保存済み KG から詳細度計算以降だけを回す。`kg_file` 必須）。Web のテストは
+この経路で Foundry も MCP も使わずに E2E を通している。
 
 ## 可変詳細度の仕組み（v3 §2.4 / 計画 §4）
 
@@ -92,6 +143,12 @@ src/
 │  ├ pipeline.py     ⓪Routing→①Ingest→③抽出→④関係検証→詳細度→ギャップ→⑧描画→検証
 │  ├ chat.py         CLI（生成・切替・展開・ギャップ確定）
 │  └ agents_def.py foundry_v2.py ingest.py tool_exec.py portal_agent.py
+├ cc_web/           ★ ローカル Web アプリ（FastAPI + 素の HTML/CSS/JS）
+│  ├ app.py         API ルート（create_app ファクトリ）
+│  ├ jobs.py        JobManager（直列実行・進捗・履歴）
+│  ├ sessions.py    plan の読取 / SVG キャッシュ / ギャップ確定 / 展開
+│  ├ account.py     az CLI から /api/me（10 分キャッシュ）
+│  └ static/        index.html（アイコンはインライン SVG スプライト）・app.css・app.js
 └ cc_tools/          FastMCP（ACA デプロイ単位）
 ```
 ★ = R1 の新規実装
@@ -126,7 +183,8 @@ LLM は指示どおりの形を返すとは限らない。実際に `evidence_sp
 
 ## 検証状況
 
-- ユニット / 統合テスト **119 件 pass**（可変詳細度 21 件・R1 機能 44 件・正規化 20 件）
+- ユニット / 統合テスト **153 件 pass**（可変詳細度 21 件・R1 機能 44 件・正規化 20 件・
+  Web アプリ 34 件）
 - 実キャンバスへの 3 レベル描画で **すべて検証 PASS**（overview 38 / standard 48 / detailed 48 要素）
 - `--target file`（MCP なし fallback）でも描画 82 要素・オフライン検証 PASS
 - スケール実測: 400 概念まで帯遵守・重なりゼロ・0.18 秒

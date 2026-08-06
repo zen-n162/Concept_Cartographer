@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from cc_core.causal import apply_relation_policy
 from cc_core.detail import build_multilevel_plan, check_level_bands, project
@@ -36,6 +36,34 @@ from cc_orchestrator.tool_exec import ToolExecutor
 logger = get_logger("cc_orchestrator.pipeline")
 
 LOCAL_BUDGET = 40000
+
+ProgressFn = Callable[[str, str], None]
+"""進捗フック: (stage_key, 日本語ラベル)。Web UI の進捗チェックリスト用。"""
+
+# 進捗ステージ。UI 側が「未着手/実行中/完了」を描くための固定順序でもあるため、
+# 並びを変えるときは cc_web/static/app.js の STAGES も揃えること。
+STAGES: tuple[tuple[str, str], ...] = (
+    ("routing", "経路判定"),
+    ("ingest", "資料収集"),
+    ("extract", "概念抽出"),
+    ("relate", "関係の検証"),
+    ("detail", "詳細度の計算"),
+    ("gaps", "ギャップ検出"),
+    ("render", "描画"),
+    ("verify", "独立検証"),
+    ("export", "出力"),
+)
+STAGE_LABELS: dict[str, str] = dict(STAGES)
+
+
+def _notify(progress: ProgressFn | None, key: str) -> None:
+    """進捗を通知する。表示都合の失敗で本処理を止めない (例外は握りつぶす)。"""
+    if progress is None:
+        return
+    try:
+        progress(key, STAGE_LABELS[key])
+    except Exception as exc:  # pragma: no cover - 通知側の事故は本処理に無関係
+        logger.debug("progress hook error: %s", type(exc).__name__)
 
 
 def ensure_agents(client: FoundryAgentsV2) -> dict[str, str]:
@@ -84,14 +112,32 @@ def run_pipeline(
     detail_level: str | None = None,
     verify_causal: bool = True,
     export_svg: bool = True,
+    progress: ProgressFn | None = None,
+    offline: bool = False,
 ) -> dict[str, Any]:
-    client = FoundryAgentsV2()
-    ensure_agents(client)
+    """概念地図生成の全経路。
+
+    progress: 各ステージ開始時に (key, 日本語ラベル) で呼ばれるフック。
+    offline:  Foundry を一切呼ばない実行モード (Web の再描画・テスト用)。
+              保存済み KG から詳細度計算以降だけを回すため kg_file が必須。
+              LLM 抽出も因果の独立検証も無いので、結果は語彙証拠のみに基づく。
+    """
+    if offline and not kg_file:
+        raise ValueError("offline モードは kg_file が必須です (LLM 抽出を行わないため)")
+
+    # offline では FoundryAgentsV2 を生成しない。生成だけで Azure 認証と
+    # エージェント確保 (ensure_agents) が走り、閉域・テストで失敗するため。
+    client = None if offline else FoundryAgentsV2()
+    if client is not None:
+        ensure_agents(client)
     executor = ToolExecutor(target=target)
     session = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     summary: dict[str, Any] = {"session": session, "target": target}
+    if offline:
+        summary["offline"] = True
 
     # ---- ⓪ Query Routing (v3 §4.1 / 計画 §6) ----
+    _notify(progress, "routing")
     decision: RouteDecision = route(message)
     summary["routing"] = decision.to_dict()
     level = detail_level or decision.detail_level or "standard"
@@ -108,11 +154,15 @@ def run_pipeline(
         return summary
 
     # ---- ①② Ingest + Extraction ----
+    _notify(progress, "ingest")
     if kg_file:
         kg, norm = normalize_kg(json.loads(Path(kg_file).read_text(encoding="utf-8")))
         summary["ingest"] = {"mode": "kg_file", "file": kg_file}
         if norm.repairs:
             summary["ingest"]["normalized"] = norm.to_dict()
+        # 抽出済みの KG を読んだ時点で「概念抽出」は完了している (UI の
+        # チェックリストが途中で止まって見えないよう、ここで通知する)
+        _notify(progress, "extract")
     else:
         docs, window = ingest(message, paths or [])
         summary["ingest"] = {
@@ -153,6 +203,7 @@ def run_pipeline(
             prompt += "\n(ローカル添付資料はありません)"
 
         logger.info("extraction start local_docs=%d workiq=%s", len(docs), not local_only)
+        _notify(progress, "extract")
         kg = extract_json(client.run("cc-extraction", prompt))
         if kg.get("error") == "no_documents":
             summary["status"] = "no_documents"
@@ -181,11 +232,15 @@ def run_pipeline(
         }
 
     # ---- ④ Relate: 因果3点セット + 矛盾の非断定化 (裁定 7) ----
-    verifier = _causal_verifier(client) if verify_causal else None
+    # offline は独立検証器 (別モデル判定) を持てないため verifier=None。
+    # 3 点セットの 3 点目が欠けるので、通る因果は語彙証拠のみの根拠になる。
+    _notify(progress, "relate")
+    verifier = _causal_verifier(client) if (verify_causal and client) else None
     kg, causal_stats = apply_relation_policy(kg, verifier=verifier)
     summary["relation_policy"] = causal_stats
 
     # ---- 可変詳細度: 3 レベル同梱を 1 回で生成 (§4) ----
+    _notify(progress, "detail")
     plan = build_multilevel_plan(kg, default_level=level,
                                  language=decision.language)
     band_problems = check_level_bands(plan)
@@ -195,6 +250,7 @@ def run_pipeline(
     summary["band_check"] = band_problems or "OK"
 
     # ---- ギャップ候補 (裁定 8) ----
+    _notify(progress, "gaps")
     gap_list = detect_gaps(kg)
     plan["gaps"] = [g.to_dict() for g in gap_list]
     summary["gaps"] = {
@@ -211,29 +267,61 @@ def run_pipeline(
     summary["layout"] = {"saved": str(plan_path)}
 
     # ---- ⑧ Project: 既定レベルを描画 + 検証 (FAIL 時 1 回再試行) ----
+    _notify(progress, "render")
     view = project(plan, level)
     view_json = json.dumps(view, ensure_ascii=False)
     verdict: dict[str, Any] = {}
-    for attempt in (1, 2):
-        render_status = extract_json(client.run(
-            "cc-projection", "この layout_plan を描画:\n" + view_json,
-            tool_executor=executor))
-        summary["projection"] = render_status
-        if render_status.get("status") != "RENDER_OK":
-            raise RuntimeError(f"projection failed: {render_status}")
-
-        verdict = extract_json(client.run(
-            "cc-verification",
-            "直前に描画した layout_plan を検証してください。plan:\n" + view_json,
-            tool_executor=executor))
+    if offline:
+        # エージェントを介さず実行系を直接叩く。往復が無いので再試行も不要。
+        render_status = executor("render_layout_plan", {"plan": view})
+        if not render_status.get("success"):
+            raise RuntimeError(f"projection failed: {render_status.get('errors')}")
+        summary["projection"] = {
+            "status": "RENDER_OK",
+            "created": len(render_status.get("created", [])),
+            "mode": render_status.get("mode", target),
+        }
+        _notify(progress, "verify")
+        report = executor("verify_scene", {})
+        verdict = {
+            "verdict": "PASS" if report.get("passed") else "FAIL",
+            "summary": (f"要素 {report.get('canvas_element_count', 0)} / 期待 "
+                        f"{report.get('expected_element_count', 0)}"
+                        f" (欠落 {len(report.get('missing_elements', []))} / "
+                        f"ラベル不一致 {len(report.get('label_mismatches', []))})"),
+        }
         summary["verification"] = verdict
-        if verdict.get("verdict") == "PASS":
-            break
-        logger.warning("verification FAIL (attempt %d)", attempt)
+    else:
+        for attempt in (1, 2):
+            render_status = extract_json(client.run(
+                "cc-projection", "この layout_plan を描画:\n" + view_json,
+                tool_executor=executor))
+            summary["projection"] = render_status
+            if render_status.get("status") != "RENDER_OK":
+                raise RuntimeError(f"projection failed: {render_status}")
+
+            _notify(progress, "verify")
+            verdict = extract_json(client.run(
+                "cc-verification",
+                "直前に描画した layout_plan を検証してください。plan:\n" + view_json,
+                tool_executor=executor))
+            summary["verification"] = verdict
+            if verdict.get("verdict") == "PASS":
+                break
+            logger.warning("verification FAIL (attempt %d)", attempt)
 
     # ---- 出力 ----
-    summary["export"] = {"excalidraw": executor.export_excalidraw(
-        f"exports/session_{session}.excalidraw")}
+    _notify(progress, "export")
+    if offline and target == "file":
+        # file 経路の offline はローカルキャンバスへ描いていない。live canvas を
+        # export すると別セッションの内容を書き出してしまうため plan から直接作る。
+        from cc_core.excalidraw_file import write_scene
+        Path("exports").mkdir(parents=True, exist_ok=True)
+        summary["export"] = {"excalidraw": write_scene(
+            view, f"exports/session_{session}.excalidraw")}
+    else:
+        summary["export"] = {"excalidraw": executor.export_excalidraw(
+            f"exports/session_{session}.excalidraw")}
     if export_svg:
         svgs = {}
         for lv in ("overview", "standard", "detailed"):
