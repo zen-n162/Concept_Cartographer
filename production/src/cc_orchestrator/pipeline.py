@@ -24,6 +24,7 @@ from cc_core.evaluation import summarize
 from cc_core.gaps import detect_gaps
 from cc_core.logging_util import get_logger
 from cc_core.mcp_client import extract_json
+from cc_core.normalize import normalize_kg
 from cc_core.svg_export import write_svg
 from cc_core.validate import validate_layout_plan
 from cc_orchestrator.agents_def import AGENT_SPECS
@@ -108,8 +109,10 @@ def run_pipeline(
 
     # ---- ①② Ingest + Extraction ----
     if kg_file:
-        kg = json.loads(Path(kg_file).read_text(encoding="utf-8"))
+        kg, norm = normalize_kg(json.loads(Path(kg_file).read_text(encoding="utf-8")))
         summary["ingest"] = {"mode": "kg_file", "file": kg_file}
+        if norm.repairs:
+            summary["ingest"]["normalized"] = norm.to_dict()
     else:
         docs, window = ingest(message, paths or [])
         summary["ingest"] = {
@@ -137,9 +140,12 @@ def run_pipeline(
             prompt += ("\nWork IQ ツールで OneDrive / SharePoint から対象期間の研究資料を"
                        "収集し、下の添付資料と併せて knowledge_graph を抽出してください。\n")
         prompt += (
-            "\n重要: 各エッジには必ず evidence_span (document_id / char_start / "
-            "char_end / surface) を付け、surface は**原文のまま**引用してください。"
-            "因果の判定は後段で語彙証拠を検査するため、要約した文ではなく原文が必要です。\n"
+            "\n重要: 各エッジには evidence_span を **配列** で付けてください。\n"
+            '  "evidence_span": [{"document_id": "<ファイルID>", '
+            '"surface": "<原文のままの引用>"}]\n'
+            "surface は要約せず原文のまま入れてください (後段で因果の語彙証拠を"
+            "検査するため)。文字位置が分かる場合のみ char_start / char_end を"
+            "整数で 追加してください。分からなければ省略して構いません。\n"
         )
         if docs:
             prompt += f"\n=== 添付資料 ({len(docs)} 件) ===\n{bundle(docs)[:LOCAL_BUDGET]}"
@@ -156,6 +162,13 @@ def run_pipeline(
             return summary
         if not kg.get("nodes"):
             raise RuntimeError(f"extraction returned no nodes: {str(kg)[:200]}")
+
+        # LLM 出力は指示どおりの形とは限らない。契約形へ正規化してから先へ渡す
+        # (実測: evidence_span を単一オブジェクトで返す / char offset が null)
+        kg, norm = normalize_kg(kg)
+        if norm.repairs or norm.warnings:
+            summary["normalized"] = norm.to_dict()
+            logger.info("kg normalized: %s", norm.repairs)
 
         kg_path = Path("graphs") / f"kg_session_{session}.json"
         kg_path.parent.mkdir(exist_ok=True)

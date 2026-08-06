@@ -127,6 +127,32 @@
           "aggregate_id": {
             "type": "string",
             "description": "kind=aggregate のとき対応する aggregates[].id"
+          },
+          "evidence_span": {
+            "type": "array",
+            "description": "関係を導出した原文スパン。surface (原文の逐語引用) は必須。char_start/char_end は取得元が返す場合のみ (Work IQ の copilot_chat はオフセットを返さないため、その場合の trace back は document 粒度)。",
+            "items": {
+              "type": "object",
+              "required": [
+                "surface"
+              ],
+              "additionalProperties": true,
+              "properties": {
+                "document_id": {
+                  "type": "string"
+                },
+                "char_start": {
+                  "type": "integer",
+                  "description": "原文の開始位置。取得元が文字オフセットを返さない場合は省略"
+                },
+                "char_end": {
+                  "type": "integer"
+                },
+                "surface": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }
@@ -177,13 +203,11 @@
           },
           "evidence_span": {
             "type": "array",
-            "description": "関係を導出した原文スパン (trace back 保証)",
+            "description": "関係を導出した原文スパン。surface (原文の逐語引用) は必須。char_start/char_end は取得元が返す場合のみ (Work IQ の copilot_chat はオフセットを返さないため、その場合の trace back は document 粒度)。",
             "items": {
               "type": "object",
               "required": [
-                "document_id",
-                "char_start",
-                "char_end"
+                "surface"
               ],
               "additionalProperties": true,
               "properties": {
@@ -191,7 +215,8 @@
                   "type": "string"
                 },
                 "char_start": {
-                  "type": "integer"
+                  "type": "integer",
+                  "description": "原文の開始位置。取得元が文字オフセットを返さない場合は省略"
                 },
                 "char_end": {
                   "type": "integer"

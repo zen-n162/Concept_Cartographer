@@ -120,8 +120,19 @@ def _edge_text(edge: dict[str, Any]) -> str:
     根拠スパンを一次情報とし、ラベルは補助に留める。
     """
     parts: list[str] = []
-    for span in edge.get("evidence_span") or []:
-        if span.get("surface"):
+    spans = edge.get("evidence_span") or []
+    # 正規化前のデータが渡ってきても壊れないようにする (単一オブジェクト・
+    # 文字列で返してくるエージェントが実在した。cc_core.normalize も参照)
+    if isinstance(spans, dict):
+        spans = [spans]
+    elif isinstance(spans, str):
+        spans = [{"surface": spans}]
+    elif not isinstance(spans, (list, tuple)):
+        spans = []
+    for span in spans:
+        if isinstance(span, str):
+            parts.append(span)
+        elif isinstance(span, dict) and span.get("surface"):
             parts.append(str(span["surface"]))
     if edge.get("label"):
         parts.append(str(edge["label"]))

@@ -55,7 +55,9 @@ EXTRACTION_INSTRUCTIONS = """\
  "source_files": ["<使った資料名>"],
  "nodes": [{"id": "c001", "label": "<概念名 25字以内>", "community_id": "comm_001"}],
  "edges": [{"id": "r001", "from": "c001", "to": "c002",
-            "label": "<関係の説明 20字以内>", "glyph": "arrow"}],
+            "label": "<関係の説明 20字以内>", "glyph": "arrow",
+            "evidence_span": [{"document_id": "<ファイルID>",
+                               "surface": "<原文のままの引用>"}]}],
  "communities": [{"id": "comm_001", "name": "<テーマ名>", "is_gap": false}]}
 
 # 抽出ルール

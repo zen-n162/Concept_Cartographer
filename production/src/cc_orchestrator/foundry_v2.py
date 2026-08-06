@@ -19,6 +19,7 @@ function tool の宣言はフラット形式 (Responses API 準拠):
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Callable
 
 import httpx
@@ -107,7 +108,51 @@ class FoundryAgentsV2:
         self._req("DELETE", f"/agents/{name}")
 
     # ---------- run (Responses API) ----------
+    # Foundry 側で一過性に起きるエラー (再試行で回復しうる)
+    TRANSIENT_MARKS = (
+        "TaskCanceledException",      # Remote MCP が 100 秒でタイムアウト (実測)
+        "did not complete the request within the configured timeout",
+        "rate limit", "429", "502", "503", "504",
+        "temporarily unavailable", "ServiceUnavailable",
+    )
+
+    def _is_transient(self, message: str) -> bool:
+        low = message.lower()
+        return any(m.lower() in low for m in self.TRANSIENT_MARKS)
+
     def run(
+        self,
+        agent_name: str,
+        user_input: str,
+        tool_executor: ToolExecutor | None = None,
+        *,
+        max_rounds: int = 12,
+        retries: int = 2,
+        retry_wait_s: float = 20.0,
+    ) -> str:
+        """エージェントを実行する。一過性エラーは待って再試行する。
+
+        Work IQ の copilot_chat は Foundry 側 HttpClient の 100 秒制限で
+        TaskCanceledException になることがある【実測 2026-08-07】。資料が多いと
+        起きやすく、待って再実行すると通ることがあるため、ここで吸収する。
+        """
+        last: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                return self._run_once(agent_name, user_input, tool_executor,
+                                      max_rounds=max_rounds)
+            except RuntimeError as exc:
+                last = exc
+                if attempt < retries and self._is_transient(str(exc)):
+                    logger.warning(
+                        "transient error on %s (%d/%d); retrying in %.0fs",
+                        agent_name, attempt + 1, retries, retry_wait_s)
+                    time.sleep(retry_wait_s)
+                    continue
+                raise
+        raise last  # type: ignore[misc]
+
+    def _run_once(
         self,
         agent_name: str,
         user_input: str,
