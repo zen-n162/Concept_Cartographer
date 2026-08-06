@@ -1,0 +1,376 @@
+{
+  "captured_at_note": "regenerate via scripts/smoke_test.sh",
+  "tools": [
+    {
+      "name": "create_element",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Custom element ID (optional, auto-generated if omitted). Use with startElementId/endElementId in batch_create_elements."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "rectangle",
+              "ellipse",
+              "diamond",
+              "arrow",
+              "text",
+              "freedraw",
+              "line",
+              "image"
+            ]
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "backgroundColor": {
+            "type": "string"
+          },
+          "strokeColor": {
+            "type": "string"
+          },
+          "strokeWidth": {
+            "type": "number"
+          },
+          "strokeStyle": {
+            "type": "string",
+            "description": "Stroke style: solid, dashed, dotted"
+          },
+          "roughness": {
+            "type": "number"
+          },
+          "opacity": {
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          },
+          "fontSize": {
+            "type": "number"
+          },
+          "fontFamily": {
+            "type": [
+              "string",
+              "number"
+            ],
+            "description": "Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID"
+          },
+          "startElementId": {
+            "type": "string",
+            "description": "For arrows: ID of the element to bind the arrow start to. Arrow auto-routes to element edge."
+          },
+          "endElementId": {
+            "type": "string",
+            "description": "For arrows: ID of the element to bind the arrow end to. Arrow auto-routes to element edge."
+          },
+          "endArrowhead": {
+            "type": "string",
+            "description": "Arrowhead style at end: arrow, bar, dot, triangle, or null"
+          },
+          "startArrowhead": {
+            "type": "string",
+            "description": "Arrowhead style at start: arrow, bar, dot, triangle, or null"
+          }
+        },
+        "required": [
+          "type",
+          "x",
+          "y"
+        ]
+      }
+    },
+    {
+      "name": "update_element",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "rectangle",
+              "ellipse",
+              "diamond",
+              "arrow",
+              "text",
+              "freedraw",
+              "line",
+              "image"
+            ]
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "backgroundColor": {
+            "type": "string"
+          },
+          "strokeColor": {
+            "type": "string"
+          },
+          "strokeWidth": {
+            "type": "number"
+          },
+          "strokeStyle": {
+            "type": "string"
+          },
+          "roughness": {
+            "type": "number"
+          },
+          "opacity": {
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          },
+          "fontSize": {
+            "type": "number"
+          },
+          "fontFamily": {
+            "type": [
+              "string",
+              "number"
+            ],
+            "description": "Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "delete_element",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "query_elements",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "rectangle",
+              "ellipse",
+              "diamond",
+              "arrow",
+              "text",
+              "freedraw",
+              "line",
+              "image"
+            ]
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "bbox": {
+            "type": "object",
+            "description": "Bounding box filter — only return elements whose origin (x, y) falls within the given coordinate range",
+            "properties": {
+              "x_min": {
+                "type": "number"
+              },
+              "x_max": {
+                "type": "number"
+              },
+              "y_min": {
+                "type": "number"
+              },
+              "y_max": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "batch_create_elements",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "elements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Custom element ID. Arrows can reference this via startElementId/endElementId."
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "rectangle",
+                    "ellipse",
+                    "diamond",
+                    "arrow",
+                    "text",
+                    "freedraw",
+                    "line",
+                    "image"
+                  ]
+                },
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "width": {
+                  "type": "number"
+                },
+                "height": {
+                  "type": "number"
+                },
+                "backgroundColor": {
+                  "type": "string"
+                },
+                "strokeColor": {
+                  "type": "string"
+                },
+                "strokeWidth": {
+                  "type": "number"
+                },
+                "strokeStyle": {
+                  "type": "string",
+                  "description": "Stroke style: solid, dashed, dotted"
+                },
+                "roughness": {
+                  "type": "number"
+                },
+                "opacity": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "fontSize": {
+                  "type": "number"
+                },
+                "fontFamily": {
+                  "type": [
+                    "string",
+                    "number"
+                  ],
+                  "description": "Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID"
+                },
+                "startElementId": {
+                  "type": "string",
+                  "description": "For arrows: ID of element to bind arrow start to"
+                },
+                "endElementId": {
+                  "type": "string",
+                  "description": "For arrows: ID of element to bind arrow end to"
+                },
+                "endArrowhead": {
+                  "type": "string",
+                  "description": "Arrowhead style at end: arrow, bar, dot, triangle, or null"
+                },
+                "startArrowhead": {
+                  "type": "string",
+                  "description": "Arrowhead style at start: arrow, bar, dot, triangle, or null"
+                }
+              },
+              "required": [
+                "type",
+                "x",
+                "y"
+              ]
+            }
+          }
+        },
+        "required": [
+          "elements"
+        ]
+      }
+    },
+    {
+      "name": "clear_canvas",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "export_scene",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "Optional file path to write the .excalidraw JSON file"
+          }
+        }
+      }
+    },
+    {
+      "name": "export_to_image",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "png",
+              "svg"
+            ],
+            "description": "Image format"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Optional file path to save the image"
+          },
+          "background": {
+            "type": "boolean",
+            "description": "Include background in export (default: true)"
+          }
+        },
+        "required": [
+          "format"
+        ]
+      }
+    },
+    {
+      "name": "describe_scene",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

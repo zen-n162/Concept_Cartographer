@@ -1,0 +1,66 @@
+{
+  "detail_level": "standard",
+  "nodes": [
+    {
+      "id": "c001",
+      "label": "NV中心",
+      "x": 100,
+      "y": 120,
+      "size": 160,
+      "community_id": "comm_001",
+      "style": { "rough": true }
+    },
+    {
+      "id": "c002",
+      "label": "温度プローブ",
+      "x": 380,
+      "y": 120,
+      "size": 180,
+      "community_id": "comm_001",
+      "style": { "rough": true }
+    },
+    {
+      "id": "c003",
+      "label": "酸化還元状態",
+      "x": 760,
+      "y": 120,
+      "size": 180,
+      "community_id": "comm_gap_001",
+      "style": { "rough": true }
+    }
+  ],
+  "edges": [
+    {
+      "id": "r001",
+      "from": "c001",
+      "to": "c002",
+      "label": "因果",
+      "glyph": "arrow"
+    },
+    {
+      "id": "r002",
+      "from": "c002",
+      "to": "c003",
+      "label": "相関(未検証)",
+      "glyph": "hole"
+    }
+  ],
+  "islands": [
+    {
+      "community_id": "comm_001",
+      "name": "量子センサと温度計測",
+      "bbox": [60, 80, 620, 250],
+      "is_gap": false
+    },
+    {
+      "community_id": "comm_gap_001",
+      "name": "ギャップ候補: 酸化還元計測",
+      "bbox": [700, 80, 1000, 250],
+      "is_gap": true
+    }
+  ],
+  "provenance": {
+    "graph_version": "kg_test_002",
+    "generated_for": "trace_test_002"
+  }
+}
