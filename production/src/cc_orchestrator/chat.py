@@ -35,6 +35,11 @@
   python -m cc_orchestrator.chat --reindex
   python -m cc_orchestrator.chat --search "データ同化"
 
+  # 質問に答える (R2b。地図は作らず、索引の材料から出典つきで答える)
+  python -m cc_orchestrator.chat "SuperPCAとスーパーピクセルの関係は?"   # local
+  python -m cc_orchestrator.chat "私の研究の全体像をまとめて"            # global
+  python -m cc_orchestrator.chat "全体像を踏まえた上で比較して"          # hybrid
+
   # 過去の修正からの学習
   python -m cc_orchestrator.chat --show-learned
   python -m cc_orchestrator.chat --relearn
@@ -83,11 +88,58 @@ from cc_orchestrator.tool_exec import ToolExecutor
 LEVELS = ("overview", "standard", "detailed")
 
 
+SOURCE_MARK = {"node": "●", "edge": "→", "community": "◆"}
+
+
+def _print_sources(s: dict) -> None:
+    """QA 経路の出典ブロック (R2b 設計書 §2 の表示)。
+
+    「どのセッションのどの資料から言っているのか」が無い答えは検証できない。
+    出典が 1 件も無いときは黙らず「なし」と書く — 出典欄が消えているのと
+    「出典が無いことを確かめた」のは別の情報なので。
+    """
+    sources = s.get("sources") or []
+    info = s.get("qa") or {}
+    if not info and not sources:
+        return
+    print()
+    if sources:
+        print(f"📚 出典 ({len(sources)} 件)")
+        for src in sources[:10]:
+            where = src.get("session") or "コーパス全体"
+            doc = f" / {src['document_id']}" if src.get("document_id") else ""
+            print(f"   {SOURCE_MARK.get(src.get('kind'), '·')} "
+                  f"{src.get('label', '')}  [{where}{doc}]")
+        if len(sources) > 10:
+            print(f"   … 他 {len(sources) - 10} 件")
+    else:
+        print("📚 出典: なし")
+    if not info:
+        return
+    bits = [f"LLM {info.get('llm_calls', 0)} call"]
+    if info.get("cache_hits"):
+        bits.append(f"要約キャッシュ命中 {info['cache_hits']}")
+    if info.get("sessions"):
+        bits.append(f"セッション {len(info['sessions'])}")
+    if info.get("communities"):
+        bits.append(f"テーマ {len(info['communities'])}")
+    if info.get("truncated"):
+        bits.append("近傍は上限で打ち切り")
+    if info.get("budget_exceeded"):
+        bits.append("呼び出し上限に到達")
+    if info.get("insufficient"):
+        bits.append("材料不足")
+    if info.get("offline"):
+        bits.append("オフライン")
+    print(f"   ({' / '.join(bits)})")
+
+
 def _print_summary(s: dict) -> None:
     print()
     if s.get("status") == "answered":
         print(f"💬 [{s['routing']['route']} 経路] {s['routing']['rationale']}")
         print(s.get("answer", ""))
+        _print_sources(s)
         return
     if s.get("status") == "no_documents":
         print(f"⚠ {s['hint']}")

@@ -7,11 +7,21 @@ R1 の 3 経路 (実運用計画 §6):
   basic   雑談・範囲外の単純質問       -> 直答 (LLM のみ、資料収集なし)
   vector  事実照会 (who/what/when)     -> AI Search KB + 直答
   map     概念地図の生成・更新          -> フルパイプライン
-R2 で local / global / hybrid、R3 で ontology-guided を追加する。
+R2b で local / global / hybrid を追加した (R2b 設計書 §2)。R3 で ontology-guided。
+
+  local   「X と Y の関係は?」        -> 索引検索 + 2-hop 近傍から直答 (出典つき)
+  global  「全体像は?」               -> コーパスコミュニティの要約から直答
+  hybrid  local と global の複合       -> 近傍 + 要約を統合して直答
 
 判定はまず決定的なルール (日本語・英語のキーワードと文型) で行い、
 確信が持てないときだけ LLM 分類器へ委ねる。ルールで済むものに LLM を
 使わないこと自体がコスト対策 (計画 §13-4)。
+
+**裁定 N (経路判定の保守性)**: 新経路へ倒すのは明示的な手がかり語があるときだけ。
+手がかりが無い入力の既定は従来どおり map で、既存 3 経路の判定は 1 件も変えない。
+そのため新しい cue の照合は MAP_CUES と BASIC_CUES の**後ろ**に置いてある —
+「概念地図として整理して」のような地図生成の依頼が、文中に「なぜ」が入って
+いるだけで QA へ流れることが無いようにするため。
 """
 
 from __future__ import annotations
@@ -25,7 +35,9 @@ from cc_core.logging_util import get_logger
 
 logger = get_logger("cc_orchestrator.routing")
 
-ROUTES = ("basic", "vector", "map")
+ROUTES = ("basic", "vector", "map", "local", "global", "hybrid")
+# 地図を作らず直答する経路 (pipeline のディスパッチ表と対応させること)
+ANSWER_ROUTES = ("basic", "vector", "local", "global", "hybrid")
 
 # --- 地図生成を明示する語 ---
 MAP_CUES = [
@@ -44,6 +56,24 @@ BASIC_CUES = [
     "こんにちは", "ありがとう", "おはよう", "hello", "hi ", "thanks",
     "使い方", "help", "ヘルプ", "できること",
 ]
+# --- 局所 QA: 特定の概念どうしの繋がりを問う (R2b 設計書 §2) ---
+# 設計書の列挙に「の関係」を足してある。設計は「との関係」だけを挙げていたが、
+# 日本語では「A と B の関係は?」と書くほうが普通で (「との関係」は現れない)、
+# 受け入れ基準 2 の例文そのものが素通りしてしまうため。地図依頼の
+# 「概念の関係を図にして」は MAP_CUES が先に当たるので影響しない。
+LOCAL_CUES = [
+    "との関係", "の関係", "との繋がり", "とのつながり",
+    "どう繋が", "どうつなが", "どう関係",
+    "なぜ", "どうして", "経緯", "原因", "影響",
+]
+# --- 大域 QA: コーパス全体を見渡す問い (R2b 設計書 §2) ---
+GLOBAL_CUES = [
+    "全体像", "俯瞰", "全体をまとめ", "全体を通して", "テーマは",
+    "何がわかって", "何が分かって", "横断して", "横断で",
+]
+# --- 複合: local の材料と global の要約を両方使う (R2b 設計書 §2) ---
+# local と global の cue が両方当たった場合もここへ倒す。
+HYBRID_CUES = ["比較して", "比べて", "整理した上で", "踏まえた上で"]
 # 詳細度の指定
 LEVEL_CUES = {
     "overview": ["概観", "俯瞰", "ざっくり", "全体像", "overview", "大まか", "簡単に"],
@@ -119,12 +149,18 @@ def route(
 ) -> RouteDecision:
     """依頼文から経路と生成オプションを決める。
 
-    ルール判定の優先順位:
+    ルール判定の優先順位 (R2b 設計書 §2):
       1. 地図生成の明示語があれば map (最も確実な合図)
       2. 雑談・ヘルプ語だけなら basic
-      3. 事実照会の文型で、かつ地図語が無ければ vector
-      4. 期間指定 (今週・今月等) があれば map (資料横断の意図)
-      5. 決まらなければ classifier (あれば) → 無ければ default_route
+      3. local / global の手がかりがあれば QA 経路 (両方当たれば hybrid)
+      4. 事実照会の文型で、かつ地図語が無ければ vector
+      5. 期間指定 (今週・今月等) があれば map (資料横断の意図)
+      6. 決まらなければ classifier (あれば) → 無ければ default_route
+
+    3 を 1・2 の**後ろ**、4 の**前**に置くのが裁定 N の実装そのもの。既存 3 経路の
+    入口 (地図語・雑談語) は先に確定させ、そのどれでもなかった問いだけを新経路が
+    受ける。「NV中心とは何ですか」(vector) に local/global の手がかりは無いので、
+    既存の判定は 1 件も動かない。
     """
     detail = parse_detail_level(message)
     language = parse_language(message)
@@ -142,6 +178,23 @@ def route(
     if basic_hit and not vector_hit and len(message) <= 40:
         return RouteDecision("basic", detail, language, window_label, tags,
                              f"雑談・ヘルプ語「{basic_hit}」で短文")
+
+    # ---- R2b: QA 経路 (裁定 N: 明示的な手がかりがあるときだけ) ----
+    local_hit = _hit(message, LOCAL_CUES)
+    global_hit = _hit(message, GLOBAL_CUES)
+    hybrid_hit = _hit(message, HYBRID_CUES)
+    if hybrid_hit or (local_hit and global_hit):
+        why = (f"複合の語「{hybrid_hit}」" if hybrid_hit
+               else f"局所「{local_hit}」と大域「{global_hit}」の両方")
+        return RouteDecision("hybrid", detail, language, window_label, tags,
+                             f"{why}があり近傍と要約を統合")
+    if local_hit:
+        return RouteDecision("local", detail, language, window_label, tags,
+                             f"特定の概念どうしを問う語「{local_hit}」")
+    if global_hit:
+        return RouteDecision("global", detail, language, window_label, tags,
+                             f"全体を見渡す語「{global_hit}」")
+
     if vector_hit:
         return RouteDecision("vector", detail, language, window_label, tags,
                              f"事実照会の文型「{vector_hit}」")

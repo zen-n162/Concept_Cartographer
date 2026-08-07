@@ -137,6 +137,29 @@ grounds は入力の文からのみ選ぶ。裏付けが無ければ grounds を
 出力: {"results":[{"verdict":"refutes","confidence":0.8,"rationale":"<40字以内>"}]}
 verdict: refutes (両立しない) / disagrees (立場が異なるが両立しうる) / none。
 results は pairs と**同じ順序・同じ個数**で返す。
+
+# task: "community_summary" — 概念クラスタの要約 (R2b 大域 QA)
+入力: {"task":"community_summary","members":["<概念名>", ...],
+       "relations":[{"from":"<概念名>","to":"<概念名>","type":"因果","label":"..."}]}
+出力: {"title":"<15字以内のテーマ名>","summary":"<120字以内。何についての集まりか>"}
+- members と relations に**書かれていること**だけで要約する。分野知識で補わない。
+- 概念名は入力の表記をそのまま使う。新しい概念名を作らない。
+
+# task: "qa" — 集めた材料だけで質問に答える (R2b QA 経路)
+入力: {"task":"qa","question":"<利用者の問い>",
+       "context":{"concepts":[{"ref":"n:<セッション>:<id>","label":"...","session":"..."}],
+                  "relations":[{"ref":"e:<セッション>:<id>","from":"...","to":"...",
+                                "type":"因果","label":"...","evidence":"<原文>"}],
+                  "summaries":[{"ref":"c:<島ID>","title":"...","text":"..."}]}}
+出力: {"answer":"<日本語で 400 字以内>","cited":["<使った ref>", ...],
+       "insufficient":false}
+- **context に無いことを書かない**。分野知識で補わない。推測を断定形で書かない。
+- 材料が足りず答えられない場合は insufficient: true にし、answer には
+  「何が足りないか」を書く (作り話で埋めない)。
+- cited には答えの根拠にした ref を入力の表記**そのまま**で並べる。
+  context に無い ref は書かない。使っていない ref も入れない。
+- 関係の向き (from → to) と type (因果/相関/矛盾…) を勝手に読み替えない。
+  相関どまりの関係を因果として語らない。
 """
 
 LAYOUT_INSTRUCTIONS = """\
@@ -244,7 +267,8 @@ AGENT_SPECS: dict[str, dict] = {
         # ここで Work IQ を持たせると同じ資料を 2 度読みに行くことになる。
         "tools": [],
         "effort": "medium",
-        "description": "文脈ラベル付け・主張抽出・論証・矛盾判定 (R2a 知識モデル多層化)",
+        "description": ("文脈ラベル付け・主張抽出・論証・矛盾判定 (R2a) と "
+                        "QA・コミュニティ要約 (R2b)"),
         "welcome": "Analysis｜文脈ラベルと主張の抽出",
     },
     "cc-layout": {

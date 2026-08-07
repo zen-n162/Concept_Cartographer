@@ -36,12 +36,13 @@ from cc_core.mcp_client import extract_json
 from cc_core.normalize import normalize_kg
 from cc_core.svg_export import write_svg
 from cc_core.validate import validate_layout_plan
-from cc_orchestrator import analysis
+from cc_orchestrator import analysis, qa
 from cc_orchestrator.agents_def import AGENT_SPECS, MODELS
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
 from cc_orchestrator.ingest import bundle, ingest
 from cc_orchestrator.routing import RouteDecision, route
 from cc_orchestrator.tool_exec import ToolExecutor
+from cc_store import SessionStore
 
 logger = get_logger("cc_orchestrator.pipeline")
 
@@ -78,6 +79,61 @@ def _notify(progress: ProgressFn | None, key: str) -> None:
         progress(key, STAGE_LABELS[key])
     except Exception as exc:  # pragma: no cover - 通知側の事故は本処理に無関係
         logger.debug("progress hook error: %s", type(exc).__name__)
+
+
+# ---------------------------------------------- 経路ディスパッチ表 (R2b §2)
+#
+# 「map 以外 → 直答」という 1 本の if 分岐を表に開いたもの。basic / vector は
+# R1 の実装をそのまま関数へ移しただけで、使うエージェントもプロンプト文字列も
+# 変えていない (受け入れ基準 1「map/basic/vector の挙動完全不変」)。
+# QA 3 経路だけが新しく、材料集めと出典の組み立ては cc_orchestrator.qa にある。
+
+
+OFFLINE_DIRECT_ANSWER = ("この問いに答えるには Foundry への接続が要ります "
+                         "(offline 実行では LLM を呼べません)。")
+
+
+def _answer_basic(message: str, *, client: FoundryAgentsV2 | None,
+                  **_: Any) -> dict[str, Any]:
+    """雑談・ヘルプ (R1 と同一: 依頼文をそのまま投げる)。"""
+    if client is None:
+        return {"answer": OFFLINE_DIRECT_ANSWER}
+    return {"answer": client.run("cc-extraction", message)}
+
+
+def _answer_vector(message: str, *, client: FoundryAgentsV2 | None,
+                   **_: Any) -> dict[str, Any]:
+    """事実照会 (R1 と同一: KB を使ってよいと添えて投げる)。"""
+    if client is None:
+        return {"answer": OFFLINE_DIRECT_ANSWER}
+    return {"answer": client.run(
+        "cc-extraction",
+        f"次の質問に、必要なら Work IQ / KB で調べて簡潔に答えてください:\n{message}")}
+
+
+def _qa_handler(route_name: str) -> Callable[..., dict[str, Any]]:
+    """local / global / hybrid の入口 (材料は保存済みの索引から作る)。"""
+    def handler(message: str, *, client: FoundryAgentsV2 | None,
+                offline: bool = False, **_: Any) -> dict[str, Any]:
+        return qa.ANSWERERS[route_name](
+            message, SessionStore(), client, offline=offline)
+    return handler
+
+
+ROUTE_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
+    "basic": _answer_basic,
+    "vector": _answer_vector,
+    **{name: _qa_handler(name) for name in qa.QA_ROUTES},
+}
+
+
+def offline_needs_kg_file(message: str) -> bool:
+    """offline 実行で kg_file が要るか = **地図生成の経路かどうか** (R2b §2)。
+
+    判定を 1 か所に置くための関数。Web の入口 (cc_web.app) も同じ規則で弾く —
+    「CLI では答えるのに Web では 400」のような食い違いを作らないため。
+    """
+    return route(message).route not in ROUTE_HANDLERS
 
 
 def ensure_agents(client: FoundryAgentsV2) -> dict[str, str]:
@@ -323,7 +379,10 @@ def run_pipeline(
 
     progress: 各ステージ開始時に (key, 日本語ラベル) で呼ばれるフック。
     offline:  Foundry を一切呼ばない実行モード (Web の再描画・テスト用)。
-              保存済み KG から詳細度計算以降だけを回すため kg_file が必須。
+              保存済み KG から詳細度計算以降だけを回すため**地図生成では
+              kg_file が必須**。R2b の QA 経路 (local/global/hybrid) は保存済みの
+              索引だけで答えられるので kg_file 無しでも通り、LLM の要る部分だけ
+              劣化した形 (「LLM なし要約」「オンライン実行が必要」) で返る。
               LLM 抽出も因果の独立検証も無いので、結果は語彙証拠のみに基づく。
     learned:  過去の修正からの学習を適用するか (編集/学習設計書 §5.3)。
               False で ①抽出ヒント ②自動適用 ③因果上書き のすべてを止める。
@@ -340,9 +399,6 @@ def run_pipeline(
               フラグに依らず常に走る — 層タグが無ければ投影は素通しなので、
               R1.5 と同じ地図が出る。
     """
-    if offline and not kg_file:
-        raise ValueError("offline モードは kg_file が必須です (LLM 抽出を行わないため)")
-
     # offline では FoundryAgentsV2 を生成しない。生成だけで Azure 認証と
     # エージェント確保 (ensure_agents) が走り、閉域・テストで失敗するため。
     client = None if offline else FoundryAgentsV2()
@@ -361,15 +417,19 @@ def run_pipeline(
     level = detail_level or decision.detail_level or "standard"
     summary["detail_level"] = level
 
-    if decision.route != "map" and not kg_file:
-        # 地図生成でない要求にフルパイプラインを回さない (コスト・時間の一次緩和)
-        agent = "cc-extraction"  # R1 は KB 検索役を兼ねる
-        prompt = (message if decision.route == "basic"
-                  else f"次の質問に、必要なら Work IQ / KB で調べて簡潔に答えてください:\n{message}")
-        summary["answer"] = client.run(agent, prompt)
+    handler = ROUTE_HANDLERS.get(decision.route)
+    if handler is not None and not kg_file:
+        # 地図生成でない要求にフルパイプラインを回さない (コスト・時間の一次緩和)。
+        # QA 経路は answer に加えて sources (出典) と qa (内訳) を返す。
+        summary.update(handler(message, client=client, offline=offline))
         summary["status"] = "answered"
         logger.info("routed to %s (no map generation)", decision.route)
         return summary
+
+    # offline の kg_file 必須は**地図生成の話**。QA 経路は保存済みの索引だけで
+    # (劣化した形で) 答えられるので、経路が決まってから判定する。
+    if offline and not kg_file:
+        raise ValueError("offline モードは kg_file が必須です (LLM 抽出を行わないため)")
 
     # ---- ①② Ingest + Extraction ----
     _notify(progress, "ingest")

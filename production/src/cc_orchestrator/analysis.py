@@ -19,6 +19,7 @@ normalize.py と同じ思想で、LLM 出力は指示どおりの形で返ると
   CC_CGW_BATCH           cgw 1 call あたりの主張数      (既定 20)
   CC_CGW_MAX_CALLS       cgw の call 数上限             (既定 2)
   CC_REFUTES_MAX_PAIRS   矛盾を問う候補ペアの上限       (既定 30)
+  CC_QA_MAX_CALLS        QA 1 問あたりの call 数上限     (既定 6・R2b §2)
 
 **既定値は「最悪でも合計 30 call/run 以下」から逆算してある** (裁定 G)。
 設計書 §6 は CC_ZONE_MAX_SENTENCES=500 と書いていたが、それだと zone だけで
@@ -895,6 +896,125 @@ def analyze_rhetoric(
     arguments = run_cgw(run, claims, zones, report=report)
     refutes = run_refutes(run, claims, report=report)
     return arguments, refutes, report
+
+
+# ------------------------------------------------------------- QA (R2b §2)
+#
+# 裁定 M: QA のために新しいエージェントは作らず、cc-analysis に task を 2 つ
+# 足す。ここでも仕事の本体は「形の修復」で、方針はゾーン/主張と同じ:
+# **LLM が返した参照を信用せず、こちらが渡した材料と突合する**。
+# 出典 (cited) に実在しない ref が混ざると、根拠を辿れない答えが「出典つき」
+# として表示されてしまい、検証できない主張が一番たちの悪い形で残る。
+
+MAX_ANSWER_CHARS = 1200
+MAX_SUMMARY_CHARS = 400
+MAX_TITLE_CHARS = 40
+
+
+def qa_max_calls() -> int:
+    """QA 1 問あたりの LLM 呼び出し上限 (設計 §2: 既定 6)。"""
+    return _knob("CC_QA_MAX_CALLS", 6)
+
+
+def _as_text(raw: Any, *keys: str) -> str:
+    """{"answer": "..."} でも "..." でも本文を取り出す。"""
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, dict):
+        for key in keys:
+            value = raw.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return ""
+
+
+def repair_qa(raw: Any, known_refs: Iterable[str],
+              report: AnalysisReport) -> dict[str, Any]:
+    """qa task の出力を {answer, cited, insufficient} へ修復する。
+
+    cited は**こちらが渡した ref だけ**に絞る。LLM が付けた出典が実在するか
+    どうかは呼び出し側では判定できないので、ここで落としきる。
+    """
+    refs = list(dict.fromkeys(str(r) for r in known_refs))
+    allowed = set(refs)
+    answer = _as_text(raw, "answer", "text", "response")[:MAX_ANSWER_CHARS]
+    cited: list[str] = []
+    source = raw.get("cited") if isinstance(raw, dict) else None
+    if isinstance(source, str):
+        source = [source]
+    for item in source or ():
+        ref = str(item.get("ref") if isinstance(item, dict) else item).strip()
+        if ref not in allowed:
+            report.note("qa: context に無い出典を破棄")
+            continue
+        if ref not in cited:
+            cited.append(ref)
+    if not answer:
+        report.note("qa: answer が空の応答")
+    insufficient = bool(isinstance(raw, dict) and raw.get("insufficient"))
+    return {"answer": answer, "cited": cited, "insufficient": insufficient}
+
+
+def run_qa(run: RunFn, question: str, context: Mapping[str, Any], *,
+           report: AnalysisReport) -> dict[str, Any]:
+    """集めた材料だけで質問に答えさせる (§2 の task: qa)。1 call。
+
+    失敗しても例外は投げない — QA は「答えられませんでした」で終われるべきで、
+    ここで落とすと呼び出し側が組み立てた材料まで捨てることになる。
+    """
+    refs = [str(item.get("ref"))
+            for key in ("concepts", "relations", "summaries")
+            for item in (context.get(key) or ())
+            if isinstance(item, Mapping) and item.get("ref")]
+    payload = _payload("qa", question=str(question), context=dict(context))
+    try:
+        raw = extract_json(run(payload))
+        report.llm_calls += 1
+    except Exception as exc:
+        report.errors.append(f"qa: {type(exc).__name__}")
+        logger.warning("qa call failed: %s", type(exc).__name__)
+        return {"answer": "", "cited": [], "insufficient": True}
+    result = repair_qa(raw, refs, report)
+    logger.info("qa done refs=%d cited=%d insufficient=%s",
+                len(refs), len(result["cited"]), result["insufficient"])
+    return result
+
+
+def repair_community_summary(raw: Any, members: Sequence[str],
+                             report: AnalysisReport) -> dict[str, str]:
+    """community_summary task の出力を {title, summary} へ修復する。
+
+    title が取れないときは**メンバーの先頭から作る** (空タイトルの島を
+    画面に出さないため)。要約が空なら呼び出し側がキャッシュしない。
+    """
+    title = _as_text(raw, "title", "name")[:MAX_TITLE_CHARS]
+    summary = _as_text(raw, "summary", "text", "description")[:MAX_SUMMARY_CHARS]
+    if not title:
+        report.note("community_summary: title が空なのでメンバー名で代用")
+        title = "・".join(str(m) for m in list(members)[:2])[:MAX_TITLE_CHARS]
+    if not summary:
+        report.note("community_summary: summary が空の応答")
+    return {"title": title, "summary": summary}
+
+
+def run_community_summary(run: RunFn, members: Sequence[str],
+                          relations: Sequence[Mapping[str, Any]] = (), *,
+                          report: AnalysisReport) -> dict[str, str]:
+    """概念クラスタを 1 段落に要約する (§2 の task: community_summary)。1 call。
+
+    裁定 L: インデックス時には呼ばない。問いに関係する上位コミュニティだけを
+    クエリ時に要約し、結果はコミュニティ指紋つきでキャッシュする。
+    """
+    payload = _payload("community_summary", members=[str(m) for m in members],
+                       relations=[dict(r) for r in relations])
+    try:
+        raw = extract_json(run(payload))
+        report.llm_calls += 1
+    except Exception as exc:
+        report.errors.append(f"community_summary: {type(exc).__name__}")
+        logger.warning("community summary failed: %s", type(exc).__name__)
+        return {"title": "", "summary": ""}
+    return repair_community_summary(raw, members, report)
 
 
 # ------------------------------------------------------------------ 入口

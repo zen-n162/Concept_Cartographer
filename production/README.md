@@ -58,9 +58,35 @@ python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m cc_orchestrator.chat --layers-summary <plan.json>    # 要約表示
 ./.venv/bin/python -m cc_orchestrator.chat --layers-summary 20260807_120000
 
+# コーパス索引 (R2b。全セッション横断。LLM 呼び出しゼロ)
+./.venv/bin/python -m cc_orchestrator.chat --reindex          # 索引を作り直す
+./.venv/bin/python -m cc_orchestrator.chat --search "データ同化"
+
+# 問いかけ (R2b。地図を作らず、索引の材料から出典つきで答える)
+./.venv/bin/python -m cc_orchestrator.chat "SuperPCAとスーパーピクセルの関係は?"
+./.venv/bin/python -m cc_orchestrator.chat "私の研究の全体像をまとめて"
+
 # テスト
-./.venv/bin/pytest -m "not e2e"      # 431 件
+./.venv/bin/pytest -m "not e2e"      # 515 件
 ```
+
+### 問いかけ（R2b の QA 経路）
+
+地図を作らせるだけでなく、**作った地図に対して質問できる**。依頼文の手がかり語で
+経路が分かれ、`concept map` を作れという語（「概念地図」「整理して」「図にして」等）が
+無い問いだけが QA へ回る（地図生成の挙動は R1 から変えていない）:
+
+| 問いかけの例 | 経路 | 何を材料にするか |
+|---|---|---|
+| 「SuperPCA とスーパーピクセルの関係は?」「なぜ〜」「〜の原因は」 | `local` | 索引で当たった概念の **2-hop 近傍**（最大 40 概念） |
+| 「私の研究の全体像をまとめて」「テーマは」「横断して見ると」 | `global` | コーパスを Leiden で割った**話題のかたまり上位 3 つの要約** |
+| 「全体像を踏まえた上で比較して」（両方の手がかり） | `hybrid` | 近傍 + 要約を 1 回で統合 |
+
+答えには必ず**出典**（概念 / 関係 / テーマと出自セッション・文書 ID）が付く。
+LLM が引かなかった場合は「何を見て答えたか」（起点の概念）を出す。コミュニティ要約は
+メンバー構成の指紋つきでキャッシュされるので、**2 回目以降の同じ問いは要約ぶんが
+0 call になる**（裁定 L: 索引作成時の LLM 呼び出しはゼロ）。1 問あたりの呼び出し上限は
+`CC_QA_MAX_CALLS`（既定 6）で、超えたぶんは材料を削って答え、その旨を答えの末尾に書く。
 
 描画先は `--target local`（Excalidraw MCP）が既定。ACA 到達前は
 `--target file` で MCP なしに `.excalidraw` / SVG を生成でき、この経路でも
@@ -200,7 +226,9 @@ src/
 - 編集後の再構成で**因果ギャップの `rejection_log` へのリンクが落ちる**
   （ギャップ 3 型そのものは再構成後も出る。`rebuild_session` は `detect_gaps(kg)`
   をログのパス無しで呼ぶため、出典リンクだけが欠ける）
-- Routing の local / global / hybrid / ontology-guided
+- Routing の ontology-guided（local / global / hybrid は R2b で実装済み）
+- コーパスがまだ小さい（5 セッション・併合 6 件）ため、`global` の要約は
+  小さな島に頼っている。**答えの品質はコーパスの厚みで決まる**
 - オフライン評価（SciNLI 等）と日本語正解セット
 - チームモード・機構横断（permission_tags は R1 から保持済み）
 

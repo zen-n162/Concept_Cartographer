@@ -30,6 +30,7 @@ from cc_core.evaluation import EvaluationSession, EvaluationStore
 from cc_core.gaps import GapDecisionError
 from cc_core.learning import cue_warnings, load_learned, summarize as summarize_learned
 from cc_core.logging_util import get_logger
+from cc_orchestrator.pipeline import offline_needs_kg_file
 from cc_web import account, jobs as jobs_mod, sessions as sessions_mod
 from cc_web.jobs import JobManager
 
@@ -265,8 +266,11 @@ def create_app() -> FastAPI:
             "layers": req.layers,
             "kg_file": _resolve_kg_file(req.kg_file) if req.kg_file else None,
         }
-        if req.offline and not params["kg_file"]:
-            raise _bad("offline モードは kg_file が必須です")
+        # offline の kg_file 必須は**地図生成の話**。R2b の QA 経路は保存済みの
+        # 索引だけで (劣化した形で) 答えられるので通す (pipeline と同じ規則)。
+        if (req.offline and not params["kg_file"]
+                and offline_needs_kg_file(params["message"])):
+            raise _bad("offline モードは kg_file が必須です (地図生成の場合)")
         job = app.state.jobs.submit(params)
         return {"job_id": job.job_id}
 

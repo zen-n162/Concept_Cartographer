@@ -237,6 +237,16 @@ button:disabled { cursor:default; }
 .chip-sm.kind-discourse { background:var(--green-50); color:var(--green-700); }
 .chip-sm.kind-causal { background:var(--pink-50); color:var(--pink-700); }
 
+/* QA 経路の出典 (R2b 設計書 §2)。回答バブルの下に畳んで置く。
+   色は既存のチップ token をそのまま使う (概念=藍 / 関係=緑 / テーマ=灰) */
+.qa-foot { margin-top:10px; padding-top:9px; border-top:var(--hairline);
+           white-space:normal; }
+.qa-foot .chip-line { margin-bottom:4px; }
+.qa-foot-label { font-size:11px; color:var(--label); margin-bottom:6px; }
+.qa-foot-note { font-size:10.5px; color:var(--faint); }
+.chip-sm.chip-link { cursor:pointer; }
+.chip-sm.chip-link:hover { box-shadow:0 0 0 1px var(--indigo-300) inset; }
+
 /* クリック展開の機械タグ (R2a 設計書 §10)。内部 30 種を畳まずに見せる箇所 */
 .tag-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:4px 0; }
 .tag { font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;

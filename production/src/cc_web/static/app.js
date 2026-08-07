@@ -38,6 +38,12 @@
   var GAP_TYPE_LABEL = {
     data: "データ不足", extraction: "抽出漏れ", true: "真の空白", unknown: "未分類"
   };
+  // QA 経路の出典チップ (R2b 設計書 §2)。cc_orchestrator.qa の sources[].kind と対応
+  var SOURCE_KIND = {
+    node: { label: "概念", cls: "" },
+    edge: { label: "関係", cls: " green" },
+    community: { label: "テーマ", cls: " grey" }
+  };
   // ギャップの検出信号の種類 (R2a 設計書 §9)。presumed_type とは別の軸
   var GAP_KIND_LABEL = {
     structural: "構造", discourse: "言説", causal: "因果"
@@ -103,6 +109,7 @@
     pickFrom: null,        // 「関係を追加」の 1 個目に選んだノード id
     files: [],             // inbox の一覧 (チップのメタ情報に使う)
     attachments: [],       // このページセッションでアップロードした名前
+    knownSessions: {},     // 履歴にある session id (QA の出典を開けるか判定する)
     settings: {
       level: "standard", causalVerify: true, localOnly: false,
       collapsed: false, learned: true, layers: true
@@ -248,6 +255,13 @@
   function renderHistory(items) {
     var box = $("#history-list");
     clear(box);
+    // 開ける (= 地図がある) セッションを控えておく。QA の出典チップは
+    // ここにあるものだけリンクにする — 開けない id をリンクに見せると、
+    // 押した先で「生成に失敗しました」が出て事故に見えるため。
+    state.knownSessions = {};
+    items.forEach(function (item) {
+      if (item.session) state.knownSessions[item.session] = true;
+    });
     var shown = items.slice(0, state.historyExpanded ? 50 : 4);
     if (!shown.length) {
       box.appendChild(el("p", "side-empty", "まだ履歴はありません"));
@@ -506,12 +520,72 @@
     tick();
   }
 
+  // 地図なしの回答 (basic / vector と R2b の local / global / hybrid)。
+  // QA 経路は summary.sources に出典が付く。**根拠を辿れない答えを地の文だけで
+  // 出さない**のがここの要点で、チップは概念/関係/テーマの別と出自セッションを
+  // 見せ、開けるセッションはクリックでその地図へ戻れる (設計 §2 の表示)。
+  function answerBubble(summary) {
+    var bubble = el("div", "bubble-ai", summary.answer || "");
+    var sources = summary.sources || [];
+    var info = summary.qa || null;
+    if (!sources.length && !info) return bubble;
+
+    var foot = el("div", "qa-foot");
+    if (sources.length) {
+      foot.appendChild(el("p", "qa-foot-label", "出典 " + sources.length + " 件"));
+      var line = el("div", "chip-line");
+      sources.slice(0, 12).forEach(function (src) {
+        var kind = SOURCE_KIND[src.kind] || { label: "出典", cls: "" };
+        var where = [];
+        if (src.session) where.push(src.session);
+        if (src.document_id) where.push(src.document_id);
+        var text = kind.label + ": " + (src.label || "");
+        var openable = src.session && state.knownSessions[src.session];
+        var chip = el(openable ? "button" : "span", "chip-sm" + kind.cls, text);
+        chip.title = where.length ? where.join(" / ") : "出自の記録なし";
+        if (openable) {
+          chip.type = "button";
+          chip.classList.add("chip-link");
+          chip.addEventListener("click", function () {
+            openSession(src.session, null, null);
+          });
+        }
+        line.appendChild(chip);
+      });
+      foot.appendChild(line);
+      if (sources.length > 12) {
+        foot.appendChild(el("p", "qa-foot-note",
+          "… 他 " + (sources.length - 12) + " 件"));
+      }
+    } else if (info) {
+      foot.appendChild(el("p", "qa-foot-label", "出典: なし"));
+    }
+
+    if (info) {
+      var bits = ["LLM " + (info.llm_calls || 0) + " call"];
+      if (info.cache_hits) bits.push("要約キャッシュ命中 " + info.cache_hits);
+      if (info.sessions && info.sessions.length) {
+        bits.push("セッション " + info.sessions.length);
+      }
+      if (info.communities && info.communities.length) {
+        bits.push("テーマ " + info.communities.length);
+      }
+      if (info.truncated) bits.push("近傍は上限で打ち切り");
+      if (info.budget_exceeded) bits.push("呼び出し上限に到達");
+      if (info.insufficient) bits.push("材料不足");
+      if (info.offline) bits.push("オフライン");
+      foot.appendChild(el("p", "qa-foot-note", bits.join(" / ")));
+    }
+    bubble.appendChild(foot);
+    return bubble;
+  }
+
   async function onJobDone(job, card) {
     var summary = job.summary || {};
     state.summary = summary;
-    if (summary.answer) {              // basic / vector 経路 (地図なし)
+    if (summary.answer) {              // basic / vector / QA 経路 (地図なし)
       card.remove();
-      $("#thread").appendChild(el("div", "bubble-ai", summary.answer));
+      $("#thread").appendChild(answerBubble(summary));
       scrollDown();
       return;
     }
