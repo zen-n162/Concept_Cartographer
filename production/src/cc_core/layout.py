@@ -74,7 +74,22 @@ def edge_label_px(label: str, glyph: str) -> float:
 
 
 def compute_layout(kg: dict[str, Any], detail_level: str = "standard") -> dict[str, Any]:
-    """Compute a layout_plan from a knowledge graph, deterministically."""
+    """Compute a layout_plan from a knowledge graph, deterministically.
+
+    レイアウト v3 設計書 §0: 入口はこの関数のまま、`CC_LAYOUT_ENGINE` を
+    **呼び出し時に**読んで semantic (v3) と grid (下の従来実装) を分ける。
+    既定は grid なので、フラグを立てない限り生成物は 1 バイトも変わらない。
+    """
+    from cc_core.layout_v3 import compute_layout_v3, semantic_enabled
+
+    if semantic_enabled():
+        return compute_layout_v3(kg, detail_level)
+    return _compute_layout_grid(kg, detail_level)
+
+
+def _compute_layout_grid(kg: dict[str, Any],
+                         detail_level: str = "standard") -> dict[str, Any]:
+    """従来の text-aware grid (v3 でも島単位のフォールバック先として恒久保守)。"""
     kg_nodes: list[dict[str, Any]] = kg.get("nodes", [])
     kg_edges: list[dict[str, Any]] = kg.get("edges", [])
     communities: dict[str, dict[str, Any]] = {

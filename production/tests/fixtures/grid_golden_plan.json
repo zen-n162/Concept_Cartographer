@@ -1,0 +1,3067 @@
+{
+  "compute_layout": {
+    "detail_level": "standard",
+    "nodes": [
+      {
+        "id": "c001",
+        "label": "マルチモーダル入力",
+        "x": 146,
+        "y": 136,
+        "size": 241,
+        "height": 66,
+        "community_id": "comm_001",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c002",
+        "label": "OneNote・Teams・論文",
+        "x": 444,
+        "y": 136,
+        "size": 280,
+        "height": 66,
+        "community_id": "comm_001",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c017",
+        "label": "閲覧・クリック・滞在履歴",
+        "x": 116,
+        "y": 236,
+        "size": 300,
+        "height": 66,
+        "community_id": "comm_001",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c018",
+        "label": "Teams議論",
+        "x": 499,
+        "y": 236,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_001",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c003",
+        "label": "LLM＋GNN",
+        "x": 968,
+        "y": 136,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c004",
+        "label": "概念自動抽出",
+        "x": 1177,
+        "y": 136,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c005",
+        "label": "概念ノードと関係エッジ",
+        "x": 1476,
+        "y": 136,
+        "size": 290,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c006",
+        "label": "関係性の構造化",
+        "x": 956,
+        "y": 236,
+        "size": 193,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c007",
+        "label": "動的グラフ",
+        "x": 1177,
+        "y": 236,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c014",
+        "label": "時系列情報フロー",
+        "x": 1513,
+        "y": 236,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c008",
+        "label": "概念マップ",
+        "x": 140,
+        "y": 544,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c009",
+        "label": "認知地図の可視化",
+        "x": 361,
+        "y": 544,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c010",
+        "label": "チームの集合知形成",
+        "x": 731,
+        "y": 544,
+        "size": 241,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c011",
+        "label": "因果・相関・矛盾",
+        "x": 116,
+        "y": 644,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c012",
+        "label": "出典スニペット",
+        "x": 373,
+        "y": 644,
+        "size": 193,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c013",
+        "label": "個別化レイアウト",
+        "x": 743,
+        "y": 644,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c019",
+        "label": "矛盾点",
+        "x": 140,
+        "y": 744,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c015",
+        "label": "研究ギャップ",
+        "x": 1204,
+        "y": 544,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_004",
+        "style": {
+          "rough": true
+        }
+      },
+      {
+        "id": "c016",
+        "label": "空白・薄い領域",
+        "x": 1402,
+        "y": 544,
+        "size": 193,
+        "height": 66,
+        "community_id": "comm_004",
+        "style": {
+          "rough": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 1-1"
+          }
+        ],
+        "id": "r001",
+        "from": "c001",
+        "to": "c004",
+        "label": "入力から概念を…",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 2-1"
+          }
+        ],
+        "id": "r002",
+        "from": "c003",
+        "to": "c005",
+        "label": "ノードとエッジ…",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 3-1"
+          }
+        ],
+        "id": "r003",
+        "from": "c004",
+        "to": "c008",
+        "label": "抽出結果を地図化",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 4-1"
+          }
+        ],
+        "id": "r004",
+        "from": "c006",
+        "to": "c008",
+        "label": "構造化して提示",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 5-1"
+          }
+        ],
+        "id": "r005",
+        "from": "c014",
+        "to": "c007",
+        "label": "時系列を反映",
+        "glyph": "wave"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 6-1"
+          }
+        ],
+        "id": "r006",
+        "from": "c009",
+        "to": "c010",
+        "label": "集合知形成を支援",
+        "glyph": "double"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 7-1"
+          }
+        ],
+        "id": "r007",
+        "from": "c002",
+        "to": "c011",
+        "label": "横断して関係を…",
+        "glyph": "wave"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 8-1"
+          }
+        ],
+        "id": "r008",
+        "from": "c008",
+        "to": "c012",
+        "label": "出典へ追跡可能",
+        "glyph": "double"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 9-1"
+          }
+        ],
+        "id": "r009",
+        "from": "c017",
+        "to": "c013",
+        "label": "履歴から動的生成",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 10-1"
+          }
+        ],
+        "id": "r010",
+        "from": "c008",
+        "to": "c015",
+        "label": "ギャップ発見候補",
+        "glyph": "hole"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 11-1"
+          }
+        ],
+        "id": "r011",
+        "from": "c002",
+        "to": "c016",
+        "label": "空白領域を探索",
+        "glyph": "hole"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 12-1"
+          }
+        ],
+        "id": "r012",
+        "from": "c008",
+        "to": "c016",
+        "label": "薄い領域を補う…",
+        "glyph": "hole"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 13-1"
+          }
+        ],
+        "id": "r013",
+        "from": "c018",
+        "to": "c019",
+        "label": "矛盾点を地図化",
+        "glyph": "zigzag"
+      }
+    ],
+    "islands": [
+      {
+        "community_id": "comm_001",
+        "name": "入力データソース",
+        "bbox": [
+          60,
+          80,
+          780,
+          358
+        ],
+        "is_gap": false
+      },
+      {
+        "community_id": "comm_002",
+        "name": "抽出・グラフ生成",
+        "bbox": [
+          900.0,
+          80,
+          1822,
+          358
+        ],
+        "is_gap": false
+      },
+      {
+        "community_id": "comm_003",
+        "name": "可視化と研究支援",
+        "bbox": [
+          60,
+          488.0,
+          1028,
+          866
+        ],
+        "is_gap": false
+      },
+      {
+        "community_id": "comm_004",
+        "name": "未検証の研究空白",
+        "bbox": [
+          1148.2,
+          488.0,
+          1651,
+          666
+        ],
+        "is_gap": true
+      }
+    ],
+    "provenance": {
+      "graph_version": "kg_aug26cc",
+      "generated_for": "layout_engine",
+      "layout_engine": "cc_core.layout/0.2 text-aware-grid"
+    }
+  },
+  "build_multilevel_plan": {
+    "detail_level": "standard",
+    "nodes": [
+      {
+        "id": "c008",
+        "label": "概念マップ",
+        "x": 128,
+        "y": 136,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_000",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 1.0,
+          "frequency": 1.0,
+          "novelty": 0.0,
+          "total": 0.7
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c004",
+        "label": "概念自動抽出",
+        "x": 454,
+        "y": 136,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_000",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.2917,
+          "frequency": 0.25,
+          "novelty": 0.75,
+          "total": 0.4167
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c001",
+        "label": "マルチモーダル入力",
+        "x": 770,
+        "y": 136,
+        "size": 241,
+        "height": 66,
+        "community_id": "comm_000",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c006",
+        "label": "関係性の構造化",
+        "x": 116,
+        "y": 251,
+        "size": 193,
+        "height": 66,
+        "community_id": "comm_000",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c012",
+        "label": "出典スニペット",
+        "x": 443,
+        "y": 251,
+        "size": 193,
+        "height": 66,
+        "community_id": "comm_000",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c015",
+        "label": "研究ギャップ",
+        "x": 806,
+        "y": 251,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_000",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c016",
+        "label": "空白・薄い領域",
+        "x": 1255,
+        "y": 136,
+        "size": 193,
+        "height": 66,
+        "community_id": "comm_001",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.5,
+          "frequency": 0.25,
+          "novelty": 0.75,
+          "total": 0.5
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c002",
+        "label": "OneNote・Teams・論文",
+        "x": 1601,
+        "y": 136,
+        "size": 280,
+        "height": 66,
+        "community_id": "comm_001",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.2917,
+          "frequency": 0.25,
+          "novelty": 0.75,
+          "total": 0.4167
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c011",
+        "label": "因果・相関・矛盾",
+        "x": 1243,
+        "y": 236,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_001",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c003",
+        "label": "LLM＋GNN",
+        "x": 2113,
+        "y": 136,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c005",
+        "label": "概念ノードと関係エッジ",
+        "x": 2417,
+        "y": 136,
+        "size": 290,
+        "height": 66,
+        "community_id": "comm_002",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c007",
+        "label": "動的グラフ",
+        "x": 116,
+        "y": 559,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c014",
+        "label": "時系列情報フロー",
+        "x": 415,
+        "y": 559,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_003",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c009",
+        "label": "認知地図の可視化",
+        "x": 864,
+        "y": 559,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_004",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c010",
+        "label": "チームの集合知形成",
+        "x": 1234,
+        "y": 559,
+        "size": 241,
+        "height": 66,
+        "community_id": "comm_004",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c013",
+        "label": "個別化レイアウト",
+        "x": 1707,
+        "y": 559,
+        "size": 217,
+        "height": 66,
+        "community_id": "comm_005",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c017",
+        "label": "閲覧・クリック・滞在履歴",
+        "x": 2058,
+        "y": 559,
+        "size": 300,
+        "height": 66,
+        "community_id": "comm_005",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c018",
+        "label": "Teams議論",
+        "x": 116,
+        "y": 867,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_006",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": true,
+          "standard": true,
+          "detailed": true
+        }
+      },
+      {
+        "id": "c019",
+        "label": "矛盾点",
+        "x": 427,
+        "y": 867,
+        "size": 170,
+        "height": 66,
+        "community_id": "comm_006",
+        "style": {
+          "rough": true
+        },
+        "kind": "concept",
+        "importance": {
+          "betweenness": 0.0,
+          "frequency": 0.0,
+          "novelty": 1.0,
+          "total": 0.3
+        },
+        "visible_at": {
+          "overview": false,
+          "standard": true,
+          "detailed": true
+        }
+      }
+    ],
+    "edges": [
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 1-1"
+          }
+        ],
+        "id": "r001",
+        "from": "c001",
+        "to": "c004",
+        "label": "入力から概念を…",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 2-1"
+          }
+        ],
+        "id": "r002",
+        "from": "c003",
+        "to": "c005",
+        "label": "ノードとエッジ…",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 3-1"
+          }
+        ],
+        "id": "r003",
+        "from": "c004",
+        "to": "c008",
+        "label": "抽出結果を地図化",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 4-1"
+          }
+        ],
+        "id": "r004",
+        "from": "c006",
+        "to": "c008",
+        "label": "構造化して提示",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 5-1"
+          }
+        ],
+        "id": "r005",
+        "from": "c014",
+        "to": "c007",
+        "label": "時系列を反映",
+        "glyph": "wave"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 6-1"
+          }
+        ],
+        "id": "r006",
+        "from": "c009",
+        "to": "c010",
+        "label": "集合知形成を支援",
+        "glyph": "double"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 7-1"
+          }
+        ],
+        "id": "r007",
+        "from": "c002",
+        "to": "c011",
+        "label": "横断して関係を…",
+        "glyph": "wave"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 8-1"
+          }
+        ],
+        "id": "r008",
+        "from": "c008",
+        "to": "c012",
+        "label": "出典へ追跡可能",
+        "glyph": "double"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 9-1"
+          }
+        ],
+        "id": "r009",
+        "from": "c017",
+        "to": "c013",
+        "label": "履歴から動的生成",
+        "glyph": "arrow"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 10-1"
+          }
+        ],
+        "id": "r010",
+        "from": "c008",
+        "to": "c015",
+        "label": "ギャップ発見候補",
+        "glyph": "hole"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 11-1"
+          }
+        ],
+        "id": "r011",
+        "from": "c002",
+        "to": "c016",
+        "label": "空白領域を探索",
+        "glyph": "hole"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 12-1"
+          }
+        ],
+        "id": "r012",
+        "from": "c008",
+        "to": "c016",
+        "label": "薄い領域を補う…",
+        "glyph": "hole"
+      },
+      {
+        "evidence_span": [
+          {
+            "document_id": "sample_proposal.docx",
+            "surface": "サンプル文書中の記述 13-1"
+          }
+        ],
+        "id": "r013",
+        "from": "c018",
+        "to": "c019",
+        "label": "矛盾点を地図化",
+        "glyph": "zigzag"
+      }
+    ],
+    "islands": [
+      {
+        "community_id": "comm_000",
+        "name": "入力データソース",
+        "bbox": [
+          60,
+          80,
+          1067,
+          373
+        ],
+        "is_gap": true
+      },
+      {
+        "community_id": "comm_001",
+        "name": "入力データソース",
+        "bbox": [
+          1187.0,
+          80,
+          1937,
+          358
+        ],
+        "is_gap": true
+      },
+      {
+        "community_id": "comm_002",
+        "name": "抽出・グラフ生成",
+        "bbox": [
+          2057.2,
+          80,
+          2763,
+          258
+        ],
+        "is_gap": false
+      },
+      {
+        "community_id": "comm_003",
+        "name": "抽出・グラフ生成",
+        "bbox": [
+          60,
+          503.0,
+          688,
+          681
+        ],
+        "is_gap": false
+      },
+      {
+        "community_id": "comm_004",
+        "name": "可視化と研究支援",
+        "bbox": [
+          808.2,
+          503.0,
+          1531,
+          681
+        ],
+        "is_gap": false
+      },
+      {
+        "community_id": "comm_005",
+        "name": "可視化と研究支援",
+        "bbox": [
+          1651.4,
+          503.0,
+          2414,
+          681
+        ],
+        "is_gap": false
+      },
+      {
+        "community_id": "comm_006",
+        "name": "入力データソース",
+        "bbox": [
+          60,
+          811.0,
+          653,
+          989
+        ],
+        "is_gap": false
+      }
+    ],
+    "provenance": {
+      "graph_version": "kg_aug26cc",
+      "generated_for": "layout_engine",
+      "layout_engine": "cc_core.detail/1.0 multilevel"
+    },
+    "levels": {
+      "overview": {
+        "nodes": 11,
+        "edges": 6,
+        "aggregates": 1
+      },
+      "standard": {
+        "nodes": 19,
+        "edges": 13,
+        "aggregates": 0
+      },
+      "detailed": {
+        "nodes": 19,
+        "edges": 13,
+        "aggregates": 0
+      }
+    },
+    "aggregates": [
+      {
+        "id": "agg-comm_000",
+        "community_id": "comm_000",
+        "summary_label": "抽出・グラフ生成 ほか3概念",
+        "member_node_ids": [
+          "c006",
+          "c012",
+          "c015"
+        ],
+        "representative_node_id": "c006",
+        "evidence": []
+      }
+    ],
+    "_level_plans": {
+      "overview": {
+        "detail_level": "overview",
+        "nodes": [
+          {
+            "id": "c008",
+            "label": "概念マップ",
+            "x": 152,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 1.0,
+              "frequency": 1.0,
+              "novelty": 0.0,
+              "total": 0.7
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c004",
+            "label": "概念自動抽出",
+            "x": 497,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.2917,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.4167
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c001",
+            "label": "マルチモーダル入力",
+            "x": 116,
+            "y": 242,
+            "size": 241,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "agg-comm_000",
+            "label": "抽出・グラフ生成 ほか3概念",
+            "x": 491,
+            "y": 236,
+            "size": 182,
+            "height": 78,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true,
+              "backgroundColor": "#e7f5ff",
+              "strokeColor": "#1971c2"
+            },
+            "kind": "aggregate",
+            "aggregate_id": "agg-comm_000"
+          },
+          {
+            "id": "c016",
+            "label": "空白・薄い領域",
+            "x": 905,
+            "y": 136,
+            "size": 193,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.5,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.5
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c002",
+            "label": "OneNote・Teams・論文",
+            "x": 1239,
+            "y": 136,
+            "size": 280,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.2917,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.4167
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c003",
+            "label": "LLM＋GNN",
+            "x": 1751,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_002",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c007",
+            "label": "動的グラフ",
+            "x": 116,
+            "y": 556,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_003",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c009",
+            "label": "認知地図の可視化",
+            "x": 518,
+            "y": 556,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_004",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c013",
+            "label": "個別化レイアウト",
+            "x": 967,
+            "y": 556,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_005",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c018",
+            "label": "Teams議論",
+            "x": 116,
+            "y": 864,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_006",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          }
+        ],
+        "edges": [
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 1-1"
+              }
+            ],
+            "id": "r001",
+            "from": "c001",
+            "to": "c004",
+            "label": "入力から概念を…",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 3-1"
+              }
+            ],
+            "id": "r003",
+            "from": "c004",
+            "to": "c008",
+            "label": "抽出結果を地図化",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 4-1"
+              }
+            ],
+            "id": "r004",
+            "from": "agg-comm_000",
+            "to": "c008",
+            "label": "構造化して提示",
+            "glyph": "arrow"
+          },
+          {
+            "member_edge_ids": [
+              "r008",
+              "r010"
+            ],
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 8-1"
+              }
+            ],
+            "id": "r008",
+            "from": "c008",
+            "to": "agg-comm_000",
+            "label": "出典へ追跡可能",
+            "glyph": "double"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 11-1"
+              }
+            ],
+            "id": "r011",
+            "from": "c002",
+            "to": "c016",
+            "label": "空白領域を探索",
+            "glyph": "hole"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 12-1"
+              }
+            ],
+            "id": "r012",
+            "from": "c008",
+            "to": "c016",
+            "label": "薄い領域を補う…",
+            "glyph": "hole"
+          }
+        ],
+        "islands": [
+          {
+            "community_id": "comm_000",
+            "name": "入力データソース",
+            "bbox": [
+              60,
+              80,
+              729,
+              370
+            ],
+            "is_gap": true
+          },
+          {
+            "community_id": "comm_001",
+            "name": "入力データソース",
+            "bbox": [
+              849.0,
+              80,
+              1575,
+              258
+            ],
+            "is_gap": true
+          },
+          {
+            "community_id": "comm_002",
+            "name": "抽出・グラフ生成",
+            "bbox": [
+              1695.2,
+              80,
+              1977,
+              258
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_003",
+            "name": "抽出・グラフ生成",
+            "bbox": [
+              60,
+              500.0,
+              342,
+              678
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_004",
+            "name": "可視化と研究支援",
+            "bbox": [
+              462.0,
+              500.0,
+              791,
+              678
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_005",
+            "name": "可視化と研究支援",
+            "bbox": [
+              911.0,
+              500.0,
+              1240,
+              678
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_006",
+            "name": "入力データソース",
+            "bbox": [
+              60,
+              808.0,
+              342,
+              986
+            ],
+            "is_gap": false
+          }
+        ],
+        "provenance": {
+          "graph_version": "kg_aug26cc",
+          "generated_for": "layout_engine",
+          "layout_engine": "cc_core.layout/0.2 text-aware-grid"
+        }
+      },
+      "standard": {
+        "detail_level": "standard",
+        "nodes": [
+          {
+            "id": "c008",
+            "label": "概念マップ",
+            "x": 128,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 1.0,
+              "frequency": 1.0,
+              "novelty": 0.0,
+              "total": 0.7
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c004",
+            "label": "概念自動抽出",
+            "x": 454,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.2917,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.4167
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c001",
+            "label": "マルチモーダル入力",
+            "x": 770,
+            "y": 136,
+            "size": 241,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c006",
+            "label": "関係性の構造化",
+            "x": 116,
+            "y": 251,
+            "size": 193,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c012",
+            "label": "出典スニペット",
+            "x": 443,
+            "y": 251,
+            "size": 193,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c015",
+            "label": "研究ギャップ",
+            "x": 806,
+            "y": 251,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c016",
+            "label": "空白・薄い領域",
+            "x": 1255,
+            "y": 136,
+            "size": 193,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.5,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.5
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c002",
+            "label": "OneNote・Teams・論文",
+            "x": 1601,
+            "y": 136,
+            "size": 280,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.2917,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.4167
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c011",
+            "label": "因果・相関・矛盾",
+            "x": 1243,
+            "y": 236,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c003",
+            "label": "LLM＋GNN",
+            "x": 2113,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_002",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c005",
+            "label": "概念ノードと関係エッジ",
+            "x": 2417,
+            "y": 136,
+            "size": 290,
+            "height": 66,
+            "community_id": "comm_002",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c007",
+            "label": "動的グラフ",
+            "x": 116,
+            "y": 559,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_003",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c014",
+            "label": "時系列情報フロー",
+            "x": 415,
+            "y": 559,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_003",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c009",
+            "label": "認知地図の可視化",
+            "x": 864,
+            "y": 559,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_004",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c010",
+            "label": "チームの集合知形成",
+            "x": 1234,
+            "y": 559,
+            "size": 241,
+            "height": 66,
+            "community_id": "comm_004",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c013",
+            "label": "個別化レイアウト",
+            "x": 1707,
+            "y": 559,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_005",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c017",
+            "label": "閲覧・クリック・滞在履歴",
+            "x": 2058,
+            "y": 559,
+            "size": 300,
+            "height": 66,
+            "community_id": "comm_005",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c018",
+            "label": "Teams議論",
+            "x": 116,
+            "y": 867,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_006",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c019",
+            "label": "矛盾点",
+            "x": 427,
+            "y": 867,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_006",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          }
+        ],
+        "edges": [
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 1-1"
+              }
+            ],
+            "id": "r001",
+            "from": "c001",
+            "to": "c004",
+            "label": "入力から概念を…",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 2-1"
+              }
+            ],
+            "id": "r002",
+            "from": "c003",
+            "to": "c005",
+            "label": "ノードとエッジ…",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 3-1"
+              }
+            ],
+            "id": "r003",
+            "from": "c004",
+            "to": "c008",
+            "label": "抽出結果を地図化",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 4-1"
+              }
+            ],
+            "id": "r004",
+            "from": "c006",
+            "to": "c008",
+            "label": "構造化して提示",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 5-1"
+              }
+            ],
+            "id": "r005",
+            "from": "c014",
+            "to": "c007",
+            "label": "時系列を反映",
+            "glyph": "wave"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 6-1"
+              }
+            ],
+            "id": "r006",
+            "from": "c009",
+            "to": "c010",
+            "label": "集合知形成を支援",
+            "glyph": "double"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 7-1"
+              }
+            ],
+            "id": "r007",
+            "from": "c002",
+            "to": "c011",
+            "label": "横断して関係を…",
+            "glyph": "wave"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 8-1"
+              }
+            ],
+            "id": "r008",
+            "from": "c008",
+            "to": "c012",
+            "label": "出典へ追跡可能",
+            "glyph": "double"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 9-1"
+              }
+            ],
+            "id": "r009",
+            "from": "c017",
+            "to": "c013",
+            "label": "履歴から動的生成",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 10-1"
+              }
+            ],
+            "id": "r010",
+            "from": "c008",
+            "to": "c015",
+            "label": "ギャップ発見候補",
+            "glyph": "hole"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 11-1"
+              }
+            ],
+            "id": "r011",
+            "from": "c002",
+            "to": "c016",
+            "label": "空白領域を探索",
+            "glyph": "hole"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 12-1"
+              }
+            ],
+            "id": "r012",
+            "from": "c008",
+            "to": "c016",
+            "label": "薄い領域を補う…",
+            "glyph": "hole"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 13-1"
+              }
+            ],
+            "id": "r013",
+            "from": "c018",
+            "to": "c019",
+            "label": "矛盾点を地図化",
+            "glyph": "zigzag"
+          }
+        ],
+        "islands": [
+          {
+            "community_id": "comm_000",
+            "name": "入力データソース",
+            "bbox": [
+              60,
+              80,
+              1067,
+              373
+            ],
+            "is_gap": true
+          },
+          {
+            "community_id": "comm_001",
+            "name": "入力データソース",
+            "bbox": [
+              1187.0,
+              80,
+              1937,
+              358
+            ],
+            "is_gap": true
+          },
+          {
+            "community_id": "comm_002",
+            "name": "抽出・グラフ生成",
+            "bbox": [
+              2057.2,
+              80,
+              2763,
+              258
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_003",
+            "name": "抽出・グラフ生成",
+            "bbox": [
+              60,
+              503.0,
+              688,
+              681
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_004",
+            "name": "可視化と研究支援",
+            "bbox": [
+              808.2,
+              503.0,
+              1531,
+              681
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_005",
+            "name": "可視化と研究支援",
+            "bbox": [
+              1651.4,
+              503.0,
+              2414,
+              681
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_006",
+            "name": "入力データソース",
+            "bbox": [
+              60,
+              811.0,
+              653,
+              989
+            ],
+            "is_gap": false
+          }
+        ],
+        "provenance": {
+          "graph_version": "kg_aug26cc",
+          "generated_for": "layout_engine",
+          "layout_engine": "cc_core.layout/0.2 text-aware-grid"
+        }
+      },
+      "detailed": {
+        "detail_level": "detailed",
+        "nodes": [
+          {
+            "id": "c008",
+            "label": "概念マップ",
+            "x": 128,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 1.0,
+              "frequency": 1.0,
+              "novelty": 0.0,
+              "total": 0.7
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c004",
+            "label": "概念自動抽出",
+            "x": 454,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.2917,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.4167
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c001",
+            "label": "マルチモーダル入力",
+            "x": 770,
+            "y": 136,
+            "size": 241,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c006",
+            "label": "関係性の構造化",
+            "x": 116,
+            "y": 251,
+            "size": 193,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c012",
+            "label": "出典スニペット",
+            "x": 443,
+            "y": 251,
+            "size": 193,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c015",
+            "label": "研究ギャップ",
+            "x": 806,
+            "y": 251,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_000",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c016",
+            "label": "空白・薄い領域",
+            "x": 1255,
+            "y": 136,
+            "size": 193,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.5,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.5
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c002",
+            "label": "OneNote・Teams・論文",
+            "x": 1601,
+            "y": 136,
+            "size": 280,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.2917,
+              "frequency": 0.25,
+              "novelty": 0.75,
+              "total": 0.4167
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c011",
+            "label": "因果・相関・矛盾",
+            "x": 1243,
+            "y": 236,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_001",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c003",
+            "label": "LLM＋GNN",
+            "x": 2113,
+            "y": 136,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_002",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c005",
+            "label": "概念ノードと関係エッジ",
+            "x": 2417,
+            "y": 136,
+            "size": 290,
+            "height": 66,
+            "community_id": "comm_002",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c007",
+            "label": "動的グラフ",
+            "x": 116,
+            "y": 559,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_003",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c014",
+            "label": "時系列情報フロー",
+            "x": 415,
+            "y": 559,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_003",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c009",
+            "label": "認知地図の可視化",
+            "x": 864,
+            "y": 559,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_004",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c010",
+            "label": "チームの集合知形成",
+            "x": 1234,
+            "y": 559,
+            "size": 241,
+            "height": 66,
+            "community_id": "comm_004",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c013",
+            "label": "個別化レイアウト",
+            "x": 1707,
+            "y": 559,
+            "size": 217,
+            "height": 66,
+            "community_id": "comm_005",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c017",
+            "label": "閲覧・クリック・滞在履歴",
+            "x": 2058,
+            "y": 559,
+            "size": 300,
+            "height": 66,
+            "community_id": "comm_005",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c018",
+            "label": "Teams議論",
+            "x": 116,
+            "y": 867,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_006",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": true,
+              "standard": true,
+              "detailed": true
+            }
+          },
+          {
+            "id": "c019",
+            "label": "矛盾点",
+            "x": 427,
+            "y": 867,
+            "size": 170,
+            "height": 66,
+            "community_id": "comm_006",
+            "style": {
+              "rough": true
+            },
+            "kind": "concept",
+            "importance": {
+              "betweenness": 0.0,
+              "frequency": 0.0,
+              "novelty": 1.0,
+              "total": 0.3
+            },
+            "visible_at": {
+              "overview": false,
+              "standard": true,
+              "detailed": true
+            }
+          }
+        ],
+        "edges": [
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 1-1"
+              }
+            ],
+            "id": "r001",
+            "from": "c001",
+            "to": "c004",
+            "label": "入力から概念を…",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 2-1"
+              }
+            ],
+            "id": "r002",
+            "from": "c003",
+            "to": "c005",
+            "label": "ノードとエッジ…",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 3-1"
+              }
+            ],
+            "id": "r003",
+            "from": "c004",
+            "to": "c008",
+            "label": "抽出結果を地図化",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 4-1"
+              }
+            ],
+            "id": "r004",
+            "from": "c006",
+            "to": "c008",
+            "label": "構造化して提示",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 5-1"
+              }
+            ],
+            "id": "r005",
+            "from": "c014",
+            "to": "c007",
+            "label": "時系列を反映",
+            "glyph": "wave"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 6-1"
+              }
+            ],
+            "id": "r006",
+            "from": "c009",
+            "to": "c010",
+            "label": "集合知形成を支援",
+            "glyph": "double"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 7-1"
+              }
+            ],
+            "id": "r007",
+            "from": "c002",
+            "to": "c011",
+            "label": "横断して関係を…",
+            "glyph": "wave"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 8-1"
+              }
+            ],
+            "id": "r008",
+            "from": "c008",
+            "to": "c012",
+            "label": "出典へ追跡可能",
+            "glyph": "double"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 9-1"
+              }
+            ],
+            "id": "r009",
+            "from": "c017",
+            "to": "c013",
+            "label": "履歴から動的生成",
+            "glyph": "arrow"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 10-1"
+              }
+            ],
+            "id": "r010",
+            "from": "c008",
+            "to": "c015",
+            "label": "ギャップ発見候補",
+            "glyph": "hole"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 11-1"
+              }
+            ],
+            "id": "r011",
+            "from": "c002",
+            "to": "c016",
+            "label": "空白領域を探索",
+            "glyph": "hole"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 12-1"
+              }
+            ],
+            "id": "r012",
+            "from": "c008",
+            "to": "c016",
+            "label": "薄い領域を補う…",
+            "glyph": "hole"
+          },
+          {
+            "evidence_span": [
+              {
+                "document_id": "sample_proposal.docx",
+                "surface": "サンプル文書中の記述 13-1"
+              }
+            ],
+            "id": "r013",
+            "from": "c018",
+            "to": "c019",
+            "label": "矛盾点を地図化",
+            "glyph": "zigzag"
+          }
+        ],
+        "islands": [
+          {
+            "community_id": "comm_000",
+            "name": "入力データソース",
+            "bbox": [
+              60,
+              80,
+              1067,
+              373
+            ],
+            "is_gap": true
+          },
+          {
+            "community_id": "comm_001",
+            "name": "入力データソース",
+            "bbox": [
+              1187.0,
+              80,
+              1937,
+              358
+            ],
+            "is_gap": true
+          },
+          {
+            "community_id": "comm_002",
+            "name": "抽出・グラフ生成",
+            "bbox": [
+              2057.2,
+              80,
+              2763,
+              258
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_003",
+            "name": "抽出・グラフ生成",
+            "bbox": [
+              60,
+              503.0,
+              688,
+              681
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_004",
+            "name": "可視化と研究支援",
+            "bbox": [
+              808.2,
+              503.0,
+              1531,
+              681
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_005",
+            "name": "可視化と研究支援",
+            "bbox": [
+              1651.4,
+              503.0,
+              2414,
+              681
+            ],
+            "is_gap": false
+          },
+          {
+            "community_id": "comm_006",
+            "name": "入力データソース",
+            "bbox": [
+              60,
+              811.0,
+              653,
+              989
+            ],
+            "is_gap": false
+          }
+        ],
+        "provenance": {
+          "graph_version": "kg_aug26cc",
+          "generated_for": "layout_engine",
+          "layout_engine": "cc_core.layout/0.2 text-aware-grid"
+        }
+      }
+    }
+  }
+}

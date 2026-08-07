@@ -237,6 +237,13 @@ def _summary_body(s: dict) -> None:
         print(f"⚠️  ラベルの重なり: {worst or '解消済み'}"
               + (f"   逃げ場なし {len(un)} 件 "
                  f"({', '.join(u['edge'] for u in un[:5])})" if un else ""))
+    # レイアウト v3 §6: 島がグリッドへ退避したときは黙らない。
+    # 退避が 0 件なら 1 行も増やさない (常用時の出力を変えないため)。
+    ly_isl = ((s.get("layout") or {}).get("islands") or {})
+    if ly_isl.get("grid_fallback"):
+        total = ly_isl.get("semantic", 0) + ly_isl["grid_fallback"]
+        print(f"🧭 レイアウト[{(s.get('layout') or {}).get('engine')}]: "
+              f"{ly_isl['grid_fallback']}/{total} 島は制約が解けずグリッドへ退避")
     lr = s.get("learned") or {}
     if lr.get("enabled"):
         print(f"🎓 {report_line(lr)}"

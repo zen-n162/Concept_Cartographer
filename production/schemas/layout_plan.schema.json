@@ -453,6 +453,14 @@
           "is_gap": {
             "type": "boolean",
             "default": false
+          },
+          "layout_mode": {
+            "type": "string",
+            "enum": [
+              "semantic",
+              "grid_fallback"
+            ],
+            "description": "レイアウト v3 §2: この島をどう組んだか。semantic = KK 等の意味的配置、grid_fallback = 制約スイープが解けずグリッドへ退避。grid エンジンではこのキー自体を付けない。"
           }
         }
       }

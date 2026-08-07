@@ -64,6 +64,13 @@ def _level_kg(
         for attr in NODE_CARRY:
             if src.get(attr):
                 node[attr] = src[attr]
+        # レイアウト v3 §4: ノードの大きさを重要度で変えるため、**レイアウトが
+        # 読める場所**= 生成の入口で importance を渡す。NODE_CARRY には足さない
+        # (kg 由来の属性ではなく analysis の産物なので出所が違う)。
+        # plan 上の最終的な値と並び順は build_multilevel_plan が付け直す。
+        imp = analysis.importance.get(nid)
+        if imp:
+            node["importance"] = imp.to_dict()
         nodes.append(node)
 
     # 集約ノードを「メンバーがいたコミュニティ」に置く
@@ -186,6 +193,10 @@ def build_multilevel_plan(
             else:
                 node["kind"] = "concept"
                 imp = analysis.importance.get(node["id"])
+                # _level_kg が先に載せた importance をいったん外してから付け直す。
+                # 値は同じだが、こうしないとキーの並びが変わって plan の JSON が
+                # 従来とバイト単位で一致しなくなる (v3 の既定は grid 完全互換)。
+                node.pop("importance", None)
                 if imp:
                     node["importance"] = imp.to_dict()
                 node["visible_at"] = analysis.visible_at(node["id"])

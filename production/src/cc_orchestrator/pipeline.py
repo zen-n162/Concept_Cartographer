@@ -28,6 +28,7 @@ from cc_core.evaluation import summarize
 from cc_core.gaps import GAP_KINDS, GAP_TYPES, detect_gaps
 from cc_core.layer_assign import assign_layer_tags
 from cc_core.layers import CAUSAL_GLYPH, apply_meta, verifier_id
+from cc_core.layout_v3 import layout_summary
 from cc_core.learning import (
     apply_learned,
     build_prompt_hints,
@@ -1266,6 +1267,9 @@ def run_pipeline(
         logger.warning("detail level band problems: %s", band_problems)
     summary["levels"] = plan["levels"]
     summary["band_check"] = band_problems or "OK"
+    # レイアウト v3 §6: どのエンジンで組んだか / 島がグリッドへ退避した件数。
+    # 退避は「読めない図」の予兆なので summary に必ず残す (CLI も 1 行出す)。
+    summary["layout"] = layout_summary(plan)
 
     # ---- 裁定 AO: 正直な上限表示 ----
     # plan にも載せる (Web は plan から作った view しか見ない)。
@@ -1320,7 +1324,7 @@ def run_pipeline(
         raise RuntimeError(f"layout plan invalid: {check.errors[:3]}")
     plan_path = Path("graphs") / f"layout_plan_session_{session}.json"
     plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
-    summary["layout"] = {"saved": str(plan_path)}
+    summary.setdefault("layout", {})["saved"] = str(plan_path)
 
     # ---- ⑧ Project: 既定レベルを描画 + 検証 (FAIL 時 1 回再試行) ----
     _notify(progress, "render")
