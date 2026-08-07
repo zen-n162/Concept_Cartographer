@@ -162,6 +162,17 @@
               "user_added"
             ],
             "description": "要素の出所 (編集/学習設計書 §2)。無印は AI 生成。user_* はユーザーが編集/追加したもので、因果精度 KPI の分母からは除外する。"
+          },
+          "onto_class": {
+            "type": "string",
+            "description": "オントロジー上の分類 (例 bfo:MaterialEntity)。LLM 付与で UNKNOWN 可 (R2a 設計書 §3.1)"
+          },
+          "claim_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "この概念に関係する主張 (nanopub id)。layers サイドカーの claims を指す一方向参照 (R2a 設計書 §3.2)"
           }
         }
       }
@@ -201,9 +212,55 @@
               "zigzag",
               "double",
               "hole",
-              "tension"
+              "tension",
+              "isa",
+              "partof",
+              "precedes",
+              "question"
             ],
-            "description": "arrow=因果(3点セット通過時のみ) / wave=相関 / zigzag=矛盾(L8導入後) / double=補強 / hole=ギャップ候補 / tension=対立候補(非断定, R1)"
+            "description": "表示記号 10 種 (R2a 設計書 §2)。cc_core.normalize.VALID_GLYPHS と同一集合に保つこと。arrow=因果(3点セット通過時のみ) / wave=相関 / zigzag=矛盾(層D refutes のみ) / double=補強 / hole=ギャップ候補 / tension=対立候補(非断定, 内部専用) / isa=分類 / partof=構成 / precedes=時系列先行 / question=疑問"
+          },
+          "layer_tags": {
+            "type": "object",
+            "description": "4 層 30 種の機械抽出タグ (R2a 設計書 §1)。UI は 10 記号だが内部の語彙は失わない。glyph はここからの決定的投影 (cc_core.layers.project_glyph) で決まる。",
+            "additionalProperties": false,
+            "properties": {
+              "layer_A": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "オントロジー層 (is_a / part_of / participates_in / has_property / located_in / has_role)"
+              },
+              "layer_B": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "言説・構造層 (hypothesis_of / method_of / evidence_for / result_of / motivation_of / limitation_of / background_of / conclusion_of)"
+              },
+              "layer_C": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "意味・因果層 (causes / correlates_with / precedes / co_occurs_with / depends_on / example_of / precondition_of / mechanism_of)"
+              },
+              "layer_D": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "認識論・修辞層 (corroborates / refutes / refines / extends / questions / agrees_with / disagrees_with / cites_as_source)"
+              }
+            }
+          },
+          "claim_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "この関係の根拠となる主張 (nanopub id)。layers サイドカーの claims を指す一方向参照 (R2a 設計書 §3.2)"
           },
           "confidence": {
             "type": "number",

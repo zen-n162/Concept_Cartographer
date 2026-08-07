@@ -31,6 +31,14 @@ logger = get_logger("cc_core.detail")
 
 AGGREGATE_STYLE = {"rough": True, "backgroundColor": "#e7f5ff", "strokeColor": "#1971c2"}
 
+# kg -> plan で運ぶ属性。**ここに書き忘れると plan に届かない**のが実測済みの
+# 関門なので、新しいフィールドを足すときは必ずこの 2 つのリストも更新すること
+# (schemas/layout_plan.schema.json / cc_web.sessions の FIELDS と 3 点セット)。
+NODE_CARRY: tuple[str, ...] = ("origin", "onto_class", "claim_refs")
+EDGE_CARRY: tuple[str, ...] = ("confidence", "evidence_span", "epistemic_status",
+                               "polarity", "provenance", "causal_check", "origin",
+                               "layer_tags", "claim_refs")
+
 
 def _level_kg(
     kg: dict[str, Any],
@@ -50,9 +58,12 @@ def _level_kg(
             "label": src.get("label", nid),
             "community_id": analysis.communities.get(nid, "comm_000"),
         }
-        # 出所 (編集/学習設計書 §2) は UI バッジと KPI の分母判定に要るので運ぶ
-        if src.get("origin"):
-            node["origin"] = src["origin"]
+        # 出所 (編集/学習設計書 §2) は UI バッジと KPI の分母判定に要るので運ぶ。
+        # onto_class / claim_refs (R2a 設計書 §3.1) も同様 — ここで落とすと
+        # plan に届かず、クリック展開で層の情報が出せなくなる。
+        for attr in NODE_CARRY:
+            if src.get(attr):
+                node[attr] = src[attr]
         nodes.append(node)
 
     # 集約ノードを「メンバーがいたコミュニティ」に置く
@@ -102,8 +113,7 @@ def _level_kg(
         if len(m["member_edge_ids"]) == 1:
             m.pop("member_edge_ids")
         # v4核§6.3 の属性を引き継ぐ (縮約時は代表エッジのもの)
-        for attr in ("confidence", "evidence_span", "epistemic_status",
-                     "polarity", "provenance", "causal_check", "origin"):
+        for attr in EDGE_CARRY:
             if src.get(attr) is not None:
                 m[attr] = src[attr]
         edges.append(m)

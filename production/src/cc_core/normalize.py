@@ -18,11 +18,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from cc_core.layers import POLARITY, normalize_layer_tags
 from cc_core.logging_util import get_logger
 
 logger = get_logger("cc_core.normalize")
 
-VALID_GLYPHS = {"arrow", "wave", "zigzag", "double", "hole", "tension"}
+# glyph 語彙の**一次定義**。layout.py / editing.py はここを import する
+# (同じ集合を 2 か所に書くと必ず片方だけ増えるため。R2a 設計書 §2 の同期リスト)。
+VALID_GLYPHS = {"arrow", "wave", "zigzag", "double", "hole", "tension",
+                "isa", "partof", "precedes", "question"}
 EPISTEMIC = {"asserted", "hedged", "hypothesized", "observed", "concluded"}
 
 
@@ -100,6 +104,23 @@ def normalize_evidence_span(raw: Any, report: NormalizeReport) -> list[dict[str,
     return out
 
 
+def normalize_claim_refs(raw: Any, report: NormalizeReport, where: str) -> list[str]:
+    """claim_refs (nanopub id の配列) を型検査する (R2a 設計書 §3.1)。
+
+    中身が実在する主張を指すかはここでは見ない — layers サイドカーは
+    まだ書かれていない段階で通ることがあるため、型だけを保証する。
+    """
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        report.note(f"{where}: claim_refs が配列でないので破棄")
+        return []
+    out = [str(v) for v in raw if isinstance(v, (str, int)) and str(v).strip()]
+    if len(out) != len(list(raw)):
+        report.note(f"{where}: claim_refs の非文字列要素を破棄")
+    return out
+
+
 def normalize_kg(kg: Any) -> tuple[dict[str, Any], NormalizeReport]:
     """LLM 出力の knowledge_graph を契約形へ揃える。
 
@@ -116,7 +137,8 @@ def normalize_kg(kg: Any) -> tuple[dict[str, Any], NormalizeReport]:
     out: dict[str, Any] = {
         "graph_version": str(kg.get("graph_version") or "kg_unknown"),
     }
-    for passthrough in ("source_files", "generated_for"):
+    # layer_model は R2a の世代印。再取り込み (kg_file 経由) で消さない
+    for passthrough in ("source_files", "generated_for", "layer_model"):
         if kg.get(passthrough) is not None:
             out[passthrough] = kg[passthrough]
 
@@ -140,13 +162,24 @@ def normalize_kg(kg: Any) -> tuple[dict[str, Any], NormalizeReport]:
             nid = f"{nid}-{i}"
         seen_ids.add(nid)
         node = {k: v for k, v in n.items()
-                if k not in ("id", "label", "community_id", "evidence_span")}
+                if k not in ("id", "label", "community_id", "evidence_span",
+                             "onto_class", "claim_refs")}
         node["id"] = nid
         node["label"] = str(n.get("label") or nid)
         node["community_id"] = str(n.get("community_id") or "comm_000")
         ev = normalize_evidence_span(n.get("evidence_span"), report)
         if ev:
             node["evidence_span"] = ev
+        # R2a: onto_class / claim_refs は型検査のみ (値の妥当性は M4/M5 の検証器)
+        if n.get("onto_class") is not None:
+            if isinstance(n["onto_class"], str) and n["onto_class"].strip():
+                node["onto_class"] = n["onto_class"].strip()
+            else:
+                report.note("node: onto_class が文字列でないので破棄")
+        if n.get("claim_refs") is not None:
+            refs = normalize_claim_refs(n["claim_refs"], report, "node")
+            if refs:
+                node["claim_refs"] = refs
         nodes.append(node)
     out["nodes"] = nodes
 
@@ -178,7 +211,8 @@ def normalize_kg(kg: Any) -> tuple[dict[str, Any], NormalizeReport]:
 
         edge = {k: v for k, v in e.items()
                 if k not in ("id", "from", "to", "label", "glyph",
-                             "evidence_span", "epistemic_status", "confidence")}
+                             "evidence_span", "epistemic_status", "confidence",
+                             "layer_tags", "polarity", "claim_refs")}
         edge.update({"id": eid, "from": str(src), "to": str(dst),
                      "label": str(e.get("label") or "")})
         glyph = e.get("glyph")
@@ -203,6 +237,26 @@ def normalize_kg(kg: Any) -> tuple[dict[str, Any], NormalizeReport]:
                 edge["confidence"] = max(0.0, min(1.0, float(conf)))
         except (TypeError, ValueError):
             report.note("edge: confidence を数値化できず破棄")
+
+        # --- R2a: 層タグ / polarity / claim_refs ---
+        # いずれも**無い場合は足さない**。R1.5 世代のエッジに勝手なキーを
+        # 生やすと、旧セッションとの差分が読めなくなるため。polarity の充填は
+        # ⑦meta (生成パイプライン) の仕事で、正規化はしない。
+        if e.get("layer_tags") is not None:
+            tags, dropped = normalize_layer_tags(e["layer_tags"])
+            edge["layer_tags"] = tags
+            for note in dropped:
+                report.note(f"edge: layer_tags {note}")
+        polarity = e.get("polarity")
+        if polarity is not None:
+            if polarity in POLARITY:
+                edge["polarity"] = polarity
+            else:
+                report.note(f"edge: 未知の polarity '{polarity}' を破棄")
+        if e.get("claim_refs") is not None:
+            refs = normalize_claim_refs(e["claim_refs"], report, "edge")
+            if refs:
+                edge["claim_refs"] = refs
         edges.append(edge)
     out["edges"] = edges
 

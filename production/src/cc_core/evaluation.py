@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from cc_core.layers import CAUSAL_GLYPH
 from cc_core.logging_util import get_logger
 
 logger = get_logger("cc_core.evaluation")
@@ -200,8 +201,9 @@ def causal_precision_log(plan: dict[str, Any]) -> dict[str, Any]:
     user_edges = sum(1 for e in plan.get("edges", [])
                      if str(e.get("origin") or "").startswith("user"))
     checked = [e for e in edges if e.get("causal_check")]
-    passed = [e for e in checked if e.get("glyph") == "arrow"]
-    demoted = [e for e in checked if e["causal_check"].get("demoted_from") == "arrow"]
+    passed = [e for e in checked if e.get("glyph") == CAUSAL_GLYPH]
+    demoted = [e for e in checked
+               if e["causal_check"].get("demoted_from") == CAUSAL_GLYPH]
     verified = [e for e in passed
                 if e["causal_check"].get("verifier_verdict") == "pass"]
     return {

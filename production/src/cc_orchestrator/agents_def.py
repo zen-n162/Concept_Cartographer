@@ -56,6 +56,7 @@ EXTRACTION_INSTRUCTIONS = """\
  "nodes": [{"id": "c001", "label": "<概念名 25字以内>", "community_id": "comm_001"}],
  "edges": [{"id": "r001", "from": "c001", "to": "c002",
             "label": "<関係の説明 20字以内>", "glyph": "arrow",
+            "polarity": "positive",
             "evidence_span": [{"document_id": "<ファイルID>",
                                "surface": "<原文のままの引用>"}]}],
  "communities": [{"id": "comm_001", "name": "<テーマ名>", "is_gap": false}]}
@@ -64,6 +65,11 @@ EXTRACTION_INSTRUCTIONS = """\
 - glyph: arrow=因果 (機序・介入・反事実の語彙証拠がある場合のみ) / wave=相関・関連 /
   zigzag=矛盾・対立 / double=補強・支持・具体例 / hole=情報不足のギャップ候補。
 - 因果の語彙証拠がなければ wave にする。相関を因果へ昇格させない。
+- polarity: 関係の向きを positive / negative / neutral の**いずれか**で付ける。
+  positive=増加・促進・改善・支持 (「A が増えると B が上がる」)、
+  negative=減少・抑制・悪化・否定 (「A により B が下がる」「B は成立しない」)、
+  neutral=向きが決まらない・単なる関連。判断できなければ neutral にする
+  (無理に positive/negative を選ばない)。3 値以外の語は使わない。
 - 言及が薄い・未検証のテーマは is_gap: true のコミュニティにまとめ、そこへの関係は
   glyph: hole とする。ギャップは候補であり断定しない。
 - コミュニティ 3〜7 個、ノード 8〜20 個。資料にない概念を創作しない。

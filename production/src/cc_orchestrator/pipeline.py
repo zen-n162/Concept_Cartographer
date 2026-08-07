@@ -22,6 +22,7 @@ from cc_core.causal import apply_relation_policy
 from cc_core.detail import build_multilevel_plan, check_level_bands, project
 from cc_core.evaluation import summarize
 from cc_core.gaps import detect_gaps
+from cc_core.layers import CAUSAL_GLYPH, apply_meta, verifier_id
 from cc_core.learning import (
     apply_learned,
     build_prompt_hints,
@@ -33,7 +34,7 @@ from cc_core.mcp_client import extract_json
 from cc_core.normalize import normalize_kg
 from cc_core.svg_export import write_svg
 from cc_core.validate import validate_layout_plan
-from cc_orchestrator.agents_def import AGENT_SPECS
+from cc_orchestrator.agents_def import AGENT_SPECS, MODELS
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
 from cc_orchestrator.ingest import bundle, ingest
 from cc_orchestrator.routing import RouteDecision, route
@@ -121,6 +122,7 @@ def run_pipeline(
     progress: ProgressFn | None = None,
     offline: bool = False,
     learned: bool = True,
+    layers: bool = False,
 ) -> dict[str, Any]:
     """概念地図生成の全経路。
 
@@ -131,6 +133,12 @@ def run_pipeline(
     learned:  過去の修正からの学習を適用するか (編集/学習設計書 §5.3)。
               False で ①抽出ヒント ②自動適用 ③因果上書き のすべてを止める。
               適用した場合は必ず summary["learned"] に内訳が出る (黙って直さない)。
+    layers:   R2a の知識モデル多層化 (文分割 → zone → claims → 検証 → 論証) を
+              走らせるか (R2a 設計書 §9)。**M3〜M6 の実装が入るまで既定 False**
+              で、True にしても現時点では層の抽出は行われない。⑦meta
+              (polarity 充填・provenance・投影・layer_model 刻印) はこのフラグに
+              依らず常に走る — 層タグが無ければ投影は素通しなので、R1.5 と
+              同じ地図が出る。
     """
     if offline and not kg_file:
         raise ValueError("offline モードは kg_file が必須です (LLM 抽出を行わないため)")
@@ -166,6 +174,9 @@ def run_pipeline(
     # ---- ①② Ingest + Extraction ----
     _notify(progress, "ingest")
     learned_store = load_learned() if learned else None
+    # ⑦meta の provenance に載せる抽出元。kg_file 経由は抽出 LLM を通って
+    # いないので、モデル名を書くと出所を偽ることになる (§9)。
+    extractor_model = "kg_file"
     if kg_file:
         kg, norm = normalize_kg(json.loads(Path(kg_file).read_text(encoding="utf-8")))
         summary["ingest"] = {"mode": "kg_file", "file": kg_file}
@@ -224,6 +235,7 @@ def run_pipeline(
         logger.info("extraction start local_docs=%d workiq=%s", len(docs), not local_only)
         _notify(progress, "extract")
         kg = extract_json(client.run("cc-extraction", prompt))
+        extractor_model = MODELS["extraction"]
         if kg.get("error") == "no_documents":
             summary["status"] = "no_documents"
             summary["hint"] = (
@@ -255,16 +267,35 @@ def run_pipeline(
     verifier = _causal_verifier(client) if (verify_causal and client) else None
     kg, causal_stats = apply_relation_policy(kg, verifier=verifier)
     summary["relation_policy"] = causal_stats
+    # provenance.validator_ids は**実際に走った**検証器だけを並べる (§9)。
+    # offline / verify_causal=False では空 = 「何も検証していない」が正しい記録。
+    validator_ids = ([verifier_id(MODELS["verification"])]
+                     if verifier is not None else [])
 
     # 因果として維持された語彙証拠を数える (§5.1 cue_stats)。R1 は記録のみで、
     # 閾値を超えた語彙の扱いは人が判断する (§12)。
     if learned:
         try:
             note_cues_kept([hit for e in kg.get("edges", [])
-                            if e.get("glyph") == "arrow"
+                            if e.get("glyph") == CAUSAL_GLYPH
                             for hit in (e.get("causal_check") or {}).get("lexicon_hit", [])])
         except OSError as exc:  # 統計が書けなくても生成は続ける
             logger.warning("cue_stats not recorded: %s", type(exc).__name__)
+
+    # ---- ⑦meta: 決定的なメタ情報の書き込み (R2a 設計書 §9) ----
+    # 独立した STAGE にはしない — LLM 呼び出しが無く、進捗に出す意味がない。
+    # polarity 充填 / provenance / 層タグ→glyph 投影 / layer_model 刻印 を
+    # **KG 保存の直前**に 1 回だけ行う。層タグがまだ無い世代 (R1.5 と
+    # layers=False の run) では投影は素通しなので、glyph も座標も変わらない。
+    if layers:
+        # M3〜M6 で ①文分割 ②zone ③claims ④検証 ⑤論証 が入る。
+        # 実装前に True で呼ばれても黙って成功させない (何が起きたか残す)。
+        summary["layers"] = {"status": "not_implemented"}
+        logger.warning("layers=True は M3 以降で実装予定 (この run では層抽出を行わない)")
+    else:
+        summary["layers"] = {"status": "disabled"}
+    summary["meta"] = apply_meta(kg, extractor_model=extractor_model,
+                                 validator_ids=validator_ids)
 
     # ---- 原本 KG の保存 (編集の base) ----
     # **関係ポリシー適用後**を保存するのが要点。ここが利用者に見えている状態で

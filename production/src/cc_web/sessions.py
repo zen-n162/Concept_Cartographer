@@ -41,11 +41,15 @@ CANVAS_URL_ENV = "EXCALIDRAW_CANVAS_URL"
 SESSION_RE = re.compile(r"^[0-9A-Za-z_\-]{1,64}$")
 
 # view JSON へ通すエッジ属性 (v4核§6.3)。plan の内部キー (_conf 等) は出さない。
+# layer_tags / claim_refs / onto_class は R2a の機械タグ (設計書 §3.1)。
+# クリック展開で「なぜこの記号なのか」を説明するために UI まで運ぶ。
 EDGE_FIELDS = ("id", "from", "to", "label", "glyph", "confidence",
                "epistemic_status", "evidence_span", "causal_check",
-               "member_edge_ids", "polarity", "provenance", "origin")
+               "member_edge_ids", "polarity", "provenance", "origin",
+               "layer_tags", "claim_refs")
 NODE_FIELDS = ("id", "label", "kind", "community_id", "importance",
-               "aggregate_id", "visible_at", "origin")
+               "aggregate_id", "visible_at", "origin",
+               "onto_class", "claim_refs")
 
 
 class SessionNotFound(LookupError):

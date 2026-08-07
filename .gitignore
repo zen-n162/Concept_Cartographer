@@ -32,6 +32,7 @@ node_modules/
 production/docs/edit-feedback-design.md
 production/docs/excalidraw-export-design.md
 production/docs/webapp-design.md
+production/docs/r2a-layers-design.md
 GITHUB_SETUP.md
 
 # --- セッション派生ファイル (テスト用の固定セッション以外) ---

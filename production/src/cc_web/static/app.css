@@ -365,7 +365,11 @@ button:disabled { cursor:default; }
 .icon-btn:hover { background:#F1EFEA; }
 
 /* 関係記号のバッジ。色は cc_core.adapter.GLYPH_STYLES の描画色に合わせる
-   (因果=赤 / 相関=青 / 補強=緑 / 矛盾=橙 / 対立候補・ギャップ=灰) */
+   (因果=赤 / 相関=青 / 補強=緑 / 矛盾=橙 / 対立候補・ギャップ=灰 /
+    分類=青 / 構成=菫 / 時系列=灰 / 疑問=橙)。
+   R2a で 4 種を追加した。地図側で色が近い対 (相関⇄分類, 矛盾⇄疑問) は
+   枠線の有無で見分けられるようにしてある — 記号だけが増えて意味が
+   区別できない状態を作らないため。 */
 .glyph { font-size:10.5px; border-radius:8px; padding:2px 8px; font-weight:500; }
 .glyph.arrow { background:#FBEAF0; color:#993556; }
 .glyph.wave { background:#E9EDFB; color:#2C4C9B; }
@@ -373,6 +377,11 @@ button:disabled { cursor:default; }
 .glyph.zigzag { background:var(--orange-50); color:var(--orange-700); }
 .glyph.tension, .glyph.hole { background:#F2F1EC; color:var(--muted);
                               border:1px dashed #D3D1C7; }
+.glyph.isa { background:#E9EDFB; color:#1B5FA8; border:1px solid #C6D4EE; }
+.glyph.partof { background:#EDE9FB; color:#553BB0; }
+.glyph.precedes { background:#EFEEE9; color:#43484D; }
+.glyph.question { background:var(--orange-50); color:var(--orange-700);
+                  border:1px dotted #D8A48E; }
 
 .toast {
   position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:80;

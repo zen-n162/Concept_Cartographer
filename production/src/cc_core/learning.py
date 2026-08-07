@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from cc_core.causal import _edge_text, find_causal_cues
+from cc_core.layers import CAUSAL_GLYPH
 from cc_core.editing import (
     GRAPHS_DIR,
     effective_edits,
@@ -189,23 +190,25 @@ def derive_learned(sessions: dict[str, list[dict[str, Any]]], *,
                 a, b = before.get("from_label"), before.get("to_label")
                 if not a or not b:
                     continue
-                if old_glyph == "arrow" and new_glyph != "arrow":
+                # 記号が 10 種に増えても「因果へ / 因果から」の判定は
+                # CAUSAL_GLYPH との異同だけで正しい (deny/allow の意味は不変)。
+                if old_glyph == CAUSAL_GLYPH and new_glyph != CAUSAL_GLYPH:
                     set_override(a, b, "deny", "user_retype", session, ts)
                     for cue in _cues_of(before):
                         cue_down[cue] = cue_down.get(cue, 0) + 1
-                elif new_glyph == "arrow" and old_glyph != "arrow":
+                elif new_glyph == CAUSAL_GLYPH and old_glyph != CAUSAL_GLYPH:
                     set_override(a, b, "allow", "user_retype", session, ts)
 
             elif op == "reverse_edge":
                 a, b = before.get("from_label"), before.get("to_label")
-                if a and b and str(before.get("glyph") or "") == "arrow":
+                if a and b and str(before.get("glyph") or "") == CAUSAL_GLYPH:
                     set_override(a, b, "reverse", "user_reverse", session, ts)
 
             elif op == "delete_edge":
                 a, b = before.get("from_label"), before.get("to_label")
                 if not a or not b:
                     continue
-                if str(before.get("glyph") or "") == "arrow":
+                if str(before.get("glyph") or "") == CAUSAL_GLYPH:
                     set_override(a, b, "deny", "user_delete", session, ts)
                     for cue in _cues_of(before):
                         cue_down[cue] = cue_down.get(cue, 0) + 1

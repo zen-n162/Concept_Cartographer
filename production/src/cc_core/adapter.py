@@ -11,6 +11,10 @@ Glyph mapping (メモ §9 の変換ルール / 色は v4 §8.3 の UI 記号色)
   double (補強)          -> 緑 太線 + ラベル前置 "⇒"
   hole   (ギャップ候補)   -> 灰 破線 + 半透明 (確定事項として描画しない) + "?"
   tension(対立候補)      -> 灰 破線 + 半透明 (R1: 矛盾を断定しない, 裁定7) + "?"
+  isa    (分類)          -> 青 実線 細 + 白抜き三角 + "◇"      (R2a 追加)
+  partof (構成)          -> 菫 実線 細 + 矢頭なし + "◧"        (R2a 追加)
+  precedes(時系列先行)   -> 灰 実線 細 + 矢印 + "▷"            (R2a 追加)
+  question(疑問)         -> 橙 点線 細 + 矢頭なし + "?"        (R2a 追加)
 """
 
 from __future__ import annotations
@@ -51,6 +55,26 @@ GLYPH_STYLES: dict[str, dict[str, Any]] = {
     "tension": {
         "strokeColor": "#868e96", "strokeStyle": "dashed", "strokeWidth": 2,
         "endArrowhead": None, "opacity": 55, "label_prefix": "? ",
+    },
+    # --- R2a で追加した 4 種 (設計書 §2)。層 A/C/D の主要な関係を、
+    # 既存パレットの流儀 (色 = 意味、破線 = 非断定) のまま拡張する。
+    # 因果 (赤) より弱い線幅にしてあるのは、地図を見たときに → が最も強い
+    # 主張として立ち上がる序列を崩さないため。
+    "isa": {
+        "strokeColor": "#1971c2", "strokeStyle": "solid", "strokeWidth": 1.5,
+        "endArrowhead": "triangle", "opacity": 100, "label_prefix": "◇ ",
+    },
+    "partof": {
+        "strokeColor": "#6741d9", "strokeStyle": "solid", "strokeWidth": 1.5,
+        "endArrowhead": None, "opacity": 100, "label_prefix": "◧ ",
+    },
+    "precedes": {
+        "strokeColor": "#495057", "strokeStyle": "solid", "strokeWidth": 1.5,
+        "endArrowhead": "arrow", "opacity": 100, "label_prefix": "▷ ",
+    },
+    "question": {
+        "strokeColor": "#e8590c", "strokeStyle": "dotted", "strokeWidth": 1.5,
+        "endArrowhead": None, "opacity": 90, "label_prefix": "? ",
     },
 }
 

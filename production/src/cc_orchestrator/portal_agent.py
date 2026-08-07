@@ -31,7 +31,8 @@ PAD, GAP_X, GAP_Y, OX, OY = 56, 120, 130, 60, 80
 NODE_FONT, EDGE_FONT, USABLE, LINE_H = 14, 12, 0.58, 1.25
 NW_MIN, NW_MAX, NH_MIN, COL_M, ROW_M = 170, 300, 66, 28, 34
 EDGE_MAX_EM, GAP_OP, FONT = 8.0, 40, 1
-PRE_EM = {"arrow":0.0,"wave":1.6,"zigzag":1.6,"double":1.6,"hole":1.6}
+PRE_EM = {"arrow":0.0,"wave":1.6,"zigzag":1.6,"double":1.6,"hole":1.6,"tension":1.6,
+          "isa":1.6,"partof":1.6,"precedes":1.6,"question":1.1}
 def dw(s):  # 表示幅 (全角=1, 半角=0.55)
     return sum(1.0 if unicodedata.east_asian_width(c) in "WFA" else 0.55 for c in s or "")
 def trunc(s, m):
@@ -49,12 +50,17 @@ def nsize(label):  # ラベルが収まる楕円の寸法
     return round(min(NW_MAX, max(NW_MIN, tw/USABLE+24))), round(max(NH_MIN, th/USABLE+18))
 def elabel_px(label, glyph):
     return 0.0 if not label else (dw(trunc(label,EDGE_MAX_EM))+PRE_EM.get(glyph,0.0))*EDGE_FONT+10
-G = {
- "arrow":  ("#c92a2a","solid",2,"arrow",100,""),
- "wave":   ("#1971c2","dotted",2,None,100,"〜 "),
- "zigzag": ("#e8590c","solid",2,"bar",100,"⚡ "),
- "double": ("#2f9e44","solid",3,"triangle",100,"⇒ "),
- "hole":   ("#868e96","dashed",2,"dot",GAP_OP,"? "),
+G = {   # cc_core.adapter.GLYPH_STYLES と同じ値に保つこと
+ "arrow":   ("#c92a2a","solid",2,"arrow",100,""),
+ "wave":    ("#1971c2","dotted",2,None,100,"〜 "),
+ "zigzag":  ("#e8590c","solid",2,"bar",100,"⚡ "),
+ "double":  ("#2f9e44","solid",3,"triangle",100,"⇒ "),
+ "hole":    ("#868e96","dashed",2,"dot",GAP_OP,"? "),
+ "tension": ("#868e96","dashed",2,None,55,"? "),
+ "isa":     ("#1971c2","solid",1.5,"triangle",100,"◇ "),
+ "partof":  ("#6741d9","solid",1.5,None,100,"◧ "),
+ "precedes":("#495057","solid",1.5,"arrow",100,"▷ "),
+ "question":("#e8590c","dotted",1.5,None,90,"? "),
 }
 def seed(k): return zlib.crc32(k.encode()) % 2000000000
 def base(i,t,x,y,w,h,**o):

@@ -24,6 +24,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from cc_core.normalize import VALID_GLYPHS
 from cc_core.textmetrics import balanced_lines, display_width, truncate
 
 # --- 描画パラメータ (adapter と揃えること) ---
@@ -44,11 +45,14 @@ ISLAND_GAP_X = 120      # 島どうしの横の間隔
 ISLAND_GAP_Y = 130      # 島の行間
 ORIGIN_X = 60
 ORIGIN_Y = 80
-VALID_GLYPHS = {"arrow", "wave", "zigzag", "double", "hole", "tension"}
+# VALID_GLYPHS は cc_core.normalize が一次定義 (R2a 設計書 §2 の同期リスト)。
+# ここに写しを置くと glyph を増やしたときに片方だけ古くなるため import する。
 
-# adapter 側の glyph 接頭辞 (ラベル幅の見積りに使う)
+# adapter 側の glyph 接頭辞 (ラベル幅の見積りに使う)。
+# adapter.GLYPH_STYLES[*]["label_prefix"] の表示幅と一致させること。
 GLYPH_PREFIX_EM = {"arrow": 0.0, "wave": 1.6, "zigzag": 1.6, "double": 1.6,
-                   "hole": 1.6, "tension": 1.6}
+                   "hole": 1.6, "tension": 1.6,
+                   "isa": 1.6, "partof": 1.6, "precedes": 1.6, "question": 1.1}
 
 
 def node_size(label: str) -> tuple[float, float]:

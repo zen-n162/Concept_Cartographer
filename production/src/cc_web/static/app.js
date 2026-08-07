@@ -18,13 +18,19 @@
     ["relate", "関係の検証"], ["detail", "詳細度の計算"], ["gaps", "ギャップ検出"],
     ["render", "描画"], ["verify", "独立検証"], ["export", "出力"]
   ];
+  // 関係記号の表示名。cc_core.normalize.VALID_GLYPHS と 1:1 で対応させること
+  // (欠けると根拠ポップオーバーが glyph の生 ID を出してしまう)。
   var GLYPH_INFO = {
     arrow: { label: "因果", cls: "arrow" },
     wave: { label: "相関", cls: "wave" },
     double: { label: "補強", cls: "double" },
     zigzag: { label: "矛盾", cls: "zigzag" },
     tension: { label: "対立候補", cls: "tension" },
-    hole: { label: "ギャップ", cls: "hole" }
+    hole: { label: "ギャップ", cls: "hole" },
+    isa: { label: "分類", cls: "isa" },
+    partof: { label: "構成", cls: "partof" },
+    precedes: { label: "時系列", cls: "precedes" },
+    question: { label: "疑問", cls: "question" }
   };
   var GAP_TYPE_LABEL = {
     data: "データ不足", extraction: "抽出漏れ", true: "真の空白", unknown: "未分類"
