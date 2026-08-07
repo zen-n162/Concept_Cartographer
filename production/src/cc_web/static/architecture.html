@@ -20,7 +20,7 @@
     font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;
     font-size:14.5px; line-height:1.8; }
   .topbar { background:var(--indigo-900); height:6px; }
-  .wrap { max-width:1000px; margin:0 auto; padding:32px 24px 64px; }
+  .wrap { max-width:1300px; margin:0 auto; padding:32px 24px 64px; }
   header.hero { display:flex; align-items:center; gap:16px; margin-bottom:6px; }
   header.hero img { width:56px; height:56px; object-fit:contain; }
   h1 { margin:0; font-size:27px; font-weight:500;
@@ -57,6 +57,238 @@
   </div>
 </header>
 
+
+<h2>全体設計図 (概要)</h2>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 1240 838" role="img" aria-label="Concept Cartographer 全体設計図: データソース、Foundry エージェント、生成パイプライン、決定的コア、知識ストアと QA、保存、編集と学習のループ、出力、ユーザー接点、品質と運用" style="min-width:1180px; display:block;">
+  <defs>
+    <linearGradient id="gtitle" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#534AB7"/><stop offset="1" stop-color="#D4537E"/>
+    </linearGradient>
+    <marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#534AB7"/>
+    </marker>
+    <marker id="p2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#D4537E"/>
+    </marker>
+    <marker id="p3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#888780"/>
+    </marker>
+  </defs>
+
+  <!-- タイトル行 -->
+  <image href="logo.png" x="22" y="8" width="48" height="48"/>
+  <text x="84" y="34" font-size="21" font-weight="600" fill="url(#gtitle)">Concept Cartographer 全体設計図</text>
+  <text x="84" y="54" font-size="11" fill="#888780">研究の断片をつなぎ、意味ある全体像へ — 実装済みコンポーネントの全体像 (2026-08 時点)</text>
+  <!-- 凡例 -->
+  <g font-size="10">
+    <rect x="880" y="10" width="340" height="48" rx="8" fill="#fff" stroke="#E8E6E0"/>
+    <line x1="894" y1="26" x2="922" y2="26" stroke="#534AB7" stroke-width="1.6" marker-end="url(#p1)"/>
+    <text x="928" y="30" fill="#5F5E5A">データ / 制御フロー</text>
+    <line x1="1046" y1="26" x2="1074" y2="26" stroke="#D4537E" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#p2)"/>
+    <text x="1080" y="30" fill="#5F5E5A">フィードバック</text>
+    <line x1="894" y1="44" x2="922" y2="44" stroke="#888780" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#p3)"/>
+    <text x="928" y="48" fill="#5F5E5A">既定 OFF (オプトイン) / 参照</text>
+  </g>
+
+  <!-- ① データソース (左列) -->
+  <g font-size="10.5">
+    <rect x="20" y="76" width="222" height="308" rx="12" fill="#fff" stroke="#E8E6E0"/>
+    <text x="34" y="98" font-size="12.5" font-weight="600" fill="#26215C">① データソース (入力)</text>
+    <rect x="34" y="110" width="194" height="92" rx="8" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="44" y="130" font-weight="600" fill="#26215C">組織内 (Work IQ 経由)</text>
+    <text x="44" y="148" fill="#5F5E5A">OneDrive / SharePoint / Teams</text>
+    <text x="44" y="164" fill="#888780" font-size="9.5">本文は Foundry 側が本人権限で読む</text>
+    <text x="44" y="180" fill="#888780" font-size="9.5">こちらへは概念と根拠引用が返る</text>
+    <rect x="34" y="214" width="194" height="72" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="44" y="234" font-weight="600" fill="#26215C">ローカル資料</text>
+    <text x="44" y="252" fill="#5F5E5A">inbox/ (PDF・docx・txt・md)</text>
+    <text x="44" y="268" fill="#888780" font-size="9.5">Web からのアップロードもここへ</text>
+    <rect x="34" y="298" width="194" height="52" rx="8" fill="none" stroke="#888780" stroke-dasharray="5 4"/>
+    <text x="44" y="318" fill="#5F5E5A">公開 API (arXiv 等)</text>
+    <text x="44" y="334" fill="#888780" font-size="9.5">既定 OFF・送信は概念ラベルのみ</text>
+    <text x="34" y="372" fill="#888780" font-size="9.5">※ 読めるのは本人が読めるものだけ</text>
+  </g>
+
+  <!-- ② Microsoft Foundry (上帯) -->
+  <g font-size="10.5">
+    <rect x="258" y="76" width="686" height="128" rx="12" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="272" y="98" font-size="12.5" font-weight="600" fill="#26215C">② Microsoft Foundry (QST テナント) — LLM エージェント 4 体</text>
+    <rect x="272" y="110" width="158" height="58" rx="8" fill="#fff" stroke="#AFA9EC"/>
+    <text x="280" y="128" font-weight="600" fill="#26215C">cc-extraction (sol)</text>
+    <text x="280" y="144" fill="#5F5E5A" font-size="9.5">資料読取と Detailed 抽出</text>
+    <text x="280" y="158" fill="#888780" font-size="9">目標未達なら資料ごと深掘り</text>
+    <rect x="440" y="110" width="158" height="58" rx="8" fill="#fff" stroke="#AFA9EC"/>
+    <text x="448" y="128" font-weight="600" fill="#26215C">cc-analysis (sol)</text>
+    <text x="448" y="144" fill="#5F5E5A" font-size="9.5">文脈・主張・論証・矛盾</text>
+    <text x="448" y="158" fill="#888780" font-size="9">QA 回答と要約も担当</text>
+    <rect x="608" y="110" width="158" height="58" rx="8" fill="#fff" stroke="#AFA9EC"/>
+    <text x="616" y="128" font-weight="600" fill="#26215C">cc-verification (terra)</text>
+    <text x="616" y="144" fill="#5F5E5A" font-size="9.5">独立検証・NLI・因果判定</text>
+    <text x="616" y="158" fill="#888780" font-size="9">抽出と別モデル (自己採点回避)</text>
+    <rect x="776" y="110" width="154" height="58" rx="8" fill="#fff" stroke="#AFA9EC"/>
+    <text x="784" y="128" font-weight="600" fill="#26215C">cc-projection (luna)</text>
+    <text x="784" y="144" fill="#5F5E5A" font-size="9.5">描画指揮 (確定 plan のみ)</text>
+    <text x="784" y="158" fill="#888780" font-size="9">復唱は信用しない設計</text>
+    <text x="272" y="192" fill="#888780" font-size="9.5">新 /agents + Responses API ・ 名前固定でバージョン管理 ・ 認証は az CLI セッション (Web からデバイスコードでサインイン可)</text>
+  </g>
+
+  <!-- ③ パイプライン -->
+  <g font-size="10">
+    <rect x="258" y="224" width="686" height="106" rx="12" fill="#fff" stroke="#534AB7" stroke-width="1.2"/>
+    <text x="272" y="246" font-size="12.5" font-weight="600" fill="#26215C">③ 生成パイプライン (⓪〜⑧)</text>
+    <text x="640" y="246" fill="#888780" font-size="9.5">因果は 3 点セット + 検証裏付けで昇格 ・ 呼び出し上限 knob</text>
+  </g>
+  <g font-size="9.5" text-anchor="middle">
+    <rect x="272" y="258" width="64" height="42" rx="7" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="304" y="275" fill="#26215C">⓪ 経路判定</text><text x="304" y="290" fill="#888780" font-size="8.5">QA なら分岐</text>
+    <rect x="346" y="258" width="64" height="42" rx="7" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="378" y="275" fill="#26215C">① 資料収集</text><text x="378" y="290" fill="#888780" font-size="8.5">WorkIQ/ローカル</text>
+    <rect x="420" y="258" width="64" height="42" rx="7" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="452" y="275" fill="#26215C">② 文脈</text><text x="452" y="290" fill="#888780" font-size="8.5">文ラベル</text>
+    <rect x="494" y="258" width="64" height="42" rx="7" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="526" y="275" fill="#26215C">③ 主張</text><text x="526" y="290" fill="#888780" font-size="8.5">Nanopub</text>
+    <rect x="568" y="258" width="64" height="42" rx="7" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="600" y="275" fill="#26215C">④ 関係検証</text><text x="600" y="290" fill="#888780" font-size="8.5">3 点セット</text>
+    <rect x="642" y="258" width="64" height="42" rx="7" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="674" y="275" fill="#26215C">⑤ 3 検証器</text><text x="674" y="290" fill="#888780" font-size="8.5">rejection_log</text>
+    <rect x="716" y="258" width="64" height="42" rx="7" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="748" y="275" fill="#26215C">⑥ 論証・矛盾</text><text x="748" y="290" fill="#888780" font-size="8.5">⚡ はここだけ</text>
+    <rect x="790" y="258" width="64" height="42" rx="7" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="822" y="275" fill="#26215C">⑦ 記号投影</text><text x="822" y="290" fill="#888780" font-size="8.5">30種→8記号</text>
+    <rect x="864" y="258" width="66" height="42" rx="7" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="897" y="275" fill="#26215C">⑧ 描画・検証</text><text x="897" y="290" fill="#888780" font-size="8.5">独立照合</text>
+  </g>
+  <g stroke="#534AB7" stroke-width="1.1" fill="none">
+    <line x1="336" y1="279" x2="344" y2="279" marker-end="url(#p1)"/>
+    <line x1="410" y1="279" x2="418" y2="279" marker-end="url(#p1)"/>
+    <line x1="484" y1="279" x2="492" y2="279" marker-end="url(#p1)"/>
+    <line x1="558" y1="279" x2="566" y2="279" marker-end="url(#p1)"/>
+    <line x1="632" y1="279" x2="640" y2="279" marker-end="url(#p1)"/>
+    <line x1="706" y1="279" x2="714" y2="279" marker-end="url(#p1)"/>
+    <line x1="780" y1="279" x2="788" y2="279" marker-end="url(#p1)"/>
+    <line x1="854" y1="279" x2="862" y2="279" marker-end="url(#p1)"/>
+  </g>
+
+  <!-- ④ 決定的コア -->
+  <g font-size="10.5">
+    <rect x="258" y="350" width="332" height="168" rx="12" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="272" y="372" font-size="12.5" font-weight="600" fill="#26215C">④ 決定的コア cc_core (LLM ゼロ)</text>
+    <text x="272" y="394" fill="#5F5E5A">・正規化と修復 / 4 層 30 種 → 8 記号の投影</text>
+    <text x="272" y="412" fill="#5F5E5A">・Leiden 詳細度 3 段 (切替 1ms) / ギャップ 3 型</text>
+    <text x="272" y="430" fill="#5F5E5A">・ラベル配置プランナー (重なりゼロ)</text>
+    <text x="272" y="448" fill="#5F5E5A">・編集の再構成 (原本不変) / 学習の適用</text>
+    <text x="272" y="466" fill="#5F5E5A">・オフライン評価 / Gap Report (閉世界)</text>
+    <text x="272" y="492" fill="#888780" font-size="9.5">同じ入力 → 必ず同じ出力 ・ テスト 743 件</text>
+  </g>
+
+  <!-- ⑤ 知識ストアと QA -->
+  <g font-size="10.5">
+    <rect x="610" y="350" width="334" height="168" rx="12" fill="#fff" stroke="#AFA9EC"/>
+    <text x="624" y="372" font-size="12.5" font-weight="600" fill="#26215C">⑤ 知識ストアと横断 QA (cc_store)</text>
+    <text x="624" y="394" fill="#5F5E5A">・SQLite 索引 + コーパスグラフ (Leiden 2 階層)</text>
+    <text x="624" y="412" fill="#888780" font-size="9.5">  派生キャッシュ — 消えても自動再構築</text>
+    <text x="624" y="434" fill="#5F5E5A">・QA 3 経路: local (近傍) / global (要約) / hybrid</text>
+    <text x="624" y="452" fill="#888780" font-size="9.5">  回答は必ず出典つき ・ 要約は指紋キャッシュ</text>
+    <text x="624" y="474" fill="#5F5E5A">・Gap Report: 型別の「次の一手」を資料横断で</text>
+    <text x="624" y="496" fill="#888780" font-size="9.5">  情報源は自分の資料の閉世界 (外部は既定 OFF)</text>
+  </g>
+
+  <!-- ⑥ 保存 -->
+  <g font-size="10.5">
+    <rect x="258" y="538" width="262" height="120" rx="12" fill="#26215C"/>
+    <text x="272" y="560" font-size="12.5" font-weight="600" fill="#EEEDFE">⑥ ローカル保存 (原本不変)</text>
+    <text x="272" y="582" fill="#CECBF6" font-size="9.5">graphs/ — 原本 KG・計画・多層記録・編集ログ</text>
+    <text x="272" y="600" fill="#CECBF6" font-size="9.5">logs/ — 評価・却下・学習・トークン・キャッシュ</text>
+    <text x="272" y="618" fill="#CECBF6" font-size="9.5">exports/ — .excalidraw / SVG / ギャップレポート</text>
+    <text x="272" y="642" fill="#8F88D8" font-size="9">現在の姿 = fold(原本, 編集ログ) で決定的に再構成</text>
+  </g>
+
+  <!-- ⑦ 編集・学習ループ -->
+  <g font-size="10.5">
+    <rect x="540" y="538" width="404" height="120" rx="12" fill="#FBEAF0" stroke="#D4537E" stroke-opacity="0.5"/>
+    <text x="554" y="560" font-size="12.5" font-weight="600" fill="#993556">⑦ 編集・学習のフィードバックループ</text>
+    <text x="554" y="582" fill="#5F5E5A">編集 8 操作 (追記ログ・取り消し可) / 地図上のクリック評価</text>
+    <text x="554" y="600" fill="#5F5E5A">→ 学習: 用語辞書・除外リスト・因果の上書き (人が最終権威)</text>
+    <text x="554" y="618" fill="#5F5E5A">→ 評価: 正解セットとして KPI (正答率・因果精度) を測定</text>
+    <text x="554" y="642" fill="#993556" font-size="9.5">適用内容は必ず表示 (黙って直さない) — 次回の生成へ反映 ⤴</text>
+  </g>
+
+  <!-- ⑧ 出力 (右列上) -->
+  <g font-size="10.5">
+    <rect x="962" y="76" width="258" height="254" rx="12" fill="#fff" stroke="#E8E6E0"/>
+    <text x="976" y="98" font-size="12.5" font-weight="600" fill="#26215C">⑧ 出力</text>
+    <rect x="976" y="110" width="230" height="38" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="988" y="128" fill="#26215C">🖼 ライブ canvas (Excalidraw)</text>
+    <text x="988" y="142" fill="#888780" font-size="9">描画後に要素を照合 (独立検証)</text>
+    <rect x="976" y="156" width="230" height="34" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="988" y="177" fill="#26215C">📄 .excalidraw / SVG (3 段)</text>
+    <rect x="976" y="198" width="230" height="34" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="988" y="219" fill="#26215C">📋 ギャップレポート (MD + JSON)</text>
+    <rect x="976" y="240" width="230" height="34" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="988" y="261" fill="#26215C">💬 QA 回答 (出典つき)</text>
+    <rect x="976" y="282" width="230" height="34" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="988" y="303" fill="#26215C">🔢 トークンレポート (日別)</text>
+  </g>
+
+  <!-- ⑨ ユーザー接点 (右列下) -->
+  <g font-size="10.5">
+    <rect x="962" y="350" width="258" height="188" rx="12" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="976" y="372" font-size="12.5" font-weight="600" fill="#26215C">⑨ ユーザー接点</text>
+    <rect x="976" y="384" width="230" height="48" rx="8" fill="#fff" stroke="#AFA9EC"/>
+    <text x="988" y="402" font-weight="600" fill="#26215C">Web アプリ (127.0.0.1:8090)</text>
+    <text x="988" y="418" fill="#888780" font-size="9">進捗・地図・編集・評価・設定・サインイン</text>
+    <rect x="976" y="440" width="230" height="40" rx="8" fill="#fff" stroke="#AFA9EC"/>
+    <text x="988" y="458" font-weight="600" fill="#26215C">CLI (cc_orchestrator.chat)</text>
+    <text x="988" y="472" fill="#888780" font-size="9">全機能を Web と両面実装</text>
+    <rect x="976" y="488" width="230" height="40" rx="8" fill="#fff" stroke="#E8E6E0"/>
+    <text x="988" y="506" fill="#26215C">説明ページ / 構成図 (ヘルプ)</text>
+    <text x="988" y="520" fill="#888780" font-size="9">機能追加のたびに更新される</text>
+  </g>
+
+  <!-- ⑩ 品質と運用 (下帯) -->
+  <g font-size="10">
+    <rect x="20" y="686" width="1200" height="106" rx="12" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="34" y="708" font-size="12.5" font-weight="600" fill="#26215C">⑩ 品質・運用・データ境界</text>
+    <g font-size="9.8" fill="#5F5E5A">
+      <rect x="34"  y="720" width="220" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="46" y="738">✓ 描画の独立検証 (別モデル + 要素照合)</text>
+      <rect x="264" y="720" width="220" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="276" y="738">✓ 3 検証器の合成 + 却下ログ (学習材料)</text>
+      <rect x="494" y="720" width="220" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="506" y="738">✓ オフライン KPI (目標 70% / 70% / 40%)</text>
+      <rect x="724" y="720" width="230" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="736" y="738">✓ テストモード (同一依頼の再実行 LLM ゼロ)</text>
+      <rect x="964" y="720" width="242" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="976" y="738">✓ トークン可視化 + 呼び出し上限 knob</text>
+      <rect x="34"  y="754" width="290" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="46" y="772">✓ 閉域前提: CDN・Web フォント・外部送信なし (既定)</text>
+      <rect x="334" y="754" width="270" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="346" y="772">✓ 版数の可視化 (/healthz・起動時の自動置換)</text>
+      <rect x="614" y="754" width="270" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="626" y="772">✓ GitHub 公開は機密除去済み (履歴からも)</text>
+      <rect x="894" y="754" width="312" height="28" rx="7" fill="#fff" stroke="#E8E6E0"/><text x="906" y="772">✓ 決定性: 同じ入力 → 同じ地図 (テスト 743 件で固定)</text>
+    </g>
+  </g>
+
+  <!-- 矢印 (少数・意味のあるものだけ) -->
+  <g stroke="#888780" stroke-width="1.2" fill="none">
+    <line x1="228" y1="156" x2="254" y2="140" marker-end="url(#p3)" stroke-dasharray="0"/>
+  </g>
+  <text x="200" y="130" font-size="9" fill="#888780">読取 (本人権限)</text>
+  <g stroke="#534AB7" stroke-width="1.3" fill="none">
+    <line x1="228" y1="250" x2="254" y2="266" marker-end="url(#p1)"/>
+    <line x1="580" y1="204" x2="580" y2="220" marker-end="url(#p1)"/>
+    <line x1="606" y1="220" x2="606" y2="208" marker-end="url(#p1)"/>
+    <line x1="424" y1="330" x2="424" y2="346" marker-end="url(#p1)"/>
+    <line x1="778" y1="330" x2="778" y2="346" marker-end="url(#p1)"/>
+    <line x1="424" y1="518" x2="424" y2="534" marker-end="url(#p1)"/>
+    <line x1="944" y1="279" x2="958" y2="279" marker-end="url(#p1)"/>
+    <line x1="944" y1="452" x2="958" y2="452" marker-end="url(#p1)"/>
+    <line x1="1090" y1="330" x2="1090" y2="346" marker-end="url(#p1)"/>
+  </g>
+  <text x="616" y="218" font-size="9" fill="#3C3489">LLM 呼び出し ⇅</text>
+  <!-- フィードバックループ (編集・学習 → パイプライン) -->
+  <path d="M 944 598 L 952 598 L 952 312 L 946 312" fill="none" stroke="#D4537E" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#p2)"/>
+</svg>
+</div>
+<figcaption>全体設計図。左から右へ「資料 → エージェント → パイプライン → コアと知識ストア → 出力・接点」、下段が保存と編集・学習のループ (桃色破線 = 修正が次回の生成へ返る)。</figcaption>
+</figure>
+
+<h2>境界図 — 何がこの Mac の外へ出るか</h2>
 <figure>
 <div class="scroll">
 <svg viewBox="0 0 1000 790" role="img" aria-label="システム構成図: この Mac 内のフロント 2 面・オーケストレーション・決定的コア・保存・描画面と、Microsoft クラウド側の Foundry エージェント・Work IQ・M365 の関係" style="min-width:940px; display:block;">
