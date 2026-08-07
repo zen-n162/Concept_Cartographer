@@ -218,6 +218,7 @@ FastAPI 127.0.0.1:8090          src/cc_web/
 | `POST /api/sessions/{s}/edits/{eid}/revert` | 編集の取り消し（二重取り消しは 409） |
 | `GET /api/learned` | 過去の修正から学習した内容の要約 |
 | `DELETE /api/files/{name}` | `inbox/` のファイル削除（アップロードの取り消し） |
+| `POST/GET /api/auth/login` `POST /api/auth/{cancel,logout}` | デバイスコード方式のサインイン開始/状態/中止、サインアウト（実体は az CLI セッション） |
 
 `run_pipeline(..., offline=True)` は **Foundry を一切呼ばない**実行モード
 （保存済み KG から詳細度計算以降だけを回す。`kg_file` 必須）。Web のテストは
