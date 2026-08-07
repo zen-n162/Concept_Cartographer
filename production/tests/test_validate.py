@@ -94,3 +94,13 @@ def test_label_normalization_ignores_wrapping_newlines():
     assert _normalize_label(" ⇒ 補強 ") == _normalize_label("⇒ 補強")
     assert _normalize_label(None) == ""
     assert _normalize_label("A") != _normalize_label("B")
+
+
+def test_labels_match_tolerates_transport_corruption():
+    """MCP ゲートウェイの多バイト破損 (U+FFFD) は前方一致で許容【実測 r010】。"""
+    from cc_core.verify import _labels_match
+
+    assert _labels_match("他領域の分割を…", "他領域の分割を���")
+    assert _labels_match("研究情報の散在", "研究情報の\n散在")   # 折返しは従来どおり
+    assert not _labels_match("他領域の分割を…", "別のラベル�")  # 前方不一致は検出
+    assert not _labels_match("正しいラベル", "違うラベル")

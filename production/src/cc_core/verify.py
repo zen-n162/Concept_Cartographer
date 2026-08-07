@@ -36,6 +36,20 @@ def _normalize_label(text: str | None) -> str:
     return "".join(text.split())
 
 
+def _labels_match(expected: str | None, actual: str | None) -> bool:
+    """正規化して比較する。転送破損 (U+FFFD) には前方一致で耐える。
+
+    MCP ゲートウェイの query_elements は多バイト文字を壊して返すことがある
+    【実測 2026-08-07: 「…」が「���」で届く。canvas の /api/elements は正常】。
+    ゲートウェイは PoC 由来の凍結資産なので、検証側は「破損文字より前が
+    一致していれば同一」とみなす。破損が無いラベルは従来どおり完全一致。
+    """
+    e, a = _normalize_label(expected), _normalize_label(actual)
+    if "�" in a:
+        return e.startswith(a[: a.index("�")])
+    return e == a
+
+
 def _element_label(el: dict[str, Any],
                    texts_by_container: dict[str, str] | None = None) -> str | None:
     """要素のラベルを取り出す。
@@ -89,7 +103,7 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
         el = by_id.get(node_element_id(node["id"]))
         if el is not None:
             actual = _element_label(el, texts_by_container)
-            if _normalize_label(actual) != _normalize_label(node["label"]):
+            if not _labels_match(node["label"], actual):
                 label_mismatches.append(
                     {
                         "element": node_element_id(node["id"]),
@@ -103,13 +117,15 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
             prefix = GLYPH_STYLES[edge["glyph"]]["label_prefix"]
             expected = f"{prefix}{edge.get('label', '')}".strip()
             actual = _element_label(el, texts_by_container)
-            if actual is None:
+            if not actual:
                 # 中点で他ノードに重なるラベルは、線に紐付けず独立テキストとして
-                # 退避させている (cc_core.overlap.resolve_label_offset)
+                # 退避させている (cc_core.overlap.resolve_label_offset)。
+                # ブラウザ同期後は線の text が None でなく空文字になることがある
+                # 【実測 2026-08-07: edge-r010】ため、falsy 全般でここへ落とす
                 offset_el = by_id.get(edge_element_id(edge["id"]) + "-label")
                 if offset_el is not None:
                     actual = offset_el.get("text")
-            if expected and _normalize_label(actual) != _normalize_label(expected):
+            if expected and not _labels_match(expected, actual):
                 label_mismatches.append(
                     {
                         "element": edge_element_id(edge["id"]),
@@ -172,7 +188,7 @@ def verify_scene_offline(plan: dict[str, Any], scene: dict[str, Any]) -> dict[st
         el = by_id.get(node_element_id(node["id"]))
         if el is not None:
             actual = _element_label(el, texts_by_container)
-            if _normalize_label(actual) != _normalize_label(node["label"]):
+            if not _labels_match(node["label"], actual):
                 label_mismatches.append({
                     "element": node_element_id(node["id"]),
                     "expected_digest": label_digest(node["label"]),
