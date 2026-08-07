@@ -31,6 +31,10 @@
   python -m cc_orchestrator.chat --layers-summary graphs/layout_plan_session_X.json
   python -m cc_orchestrator.chat --layers-summary 20260807_120000
 
+  # コーパス索引 (R2b。LLM 不要。索引は派生キャッシュで消しても作り直せる)
+  python -m cc_orchestrator.chat --reindex
+  python -m cc_orchestrator.chat --search "データ同化"
+
   # 過去の修正からの学習
   python -m cc_orchestrator.chat --show-learned
   python -m cc_orchestrator.chat --relearn
@@ -71,6 +75,7 @@ from cc_core.learning import (
     update_from_edit,
 )
 from cc_core.svg_export import write_svg
+from cc_store import SessionStore, rebuild_index
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
 from cc_orchestrator.pipeline import ensure_agents, run_pipeline
 from cc_orchestrator.tool_exec import ToolExecutor
@@ -274,6 +279,53 @@ def _print_layers_summary(target: str) -> None:
         print("   📄 rejection_log: なし (却下された主張・因果候補はありません)")
 
 
+# ------------------------------------------------- コーパス索引 (R2b §1)
+
+
+def _print_reindex(graphs_dir: str | Path = layers_store.GRAPHS_DIR) -> None:
+    """--reindex: 全セッションから索引とコーパスを作り直す (LLM 呼び出しゼロ)。
+
+    索引は**派生キャッシュ**なので、これは「壊れたら押すボタン」であって
+    日常操作ではない (指紋が変われば検索時に自動で作り直される)。手動の口を
+    残すのは、自動再構築が効かないほど壊れたときの最後の逃げ道として。
+    """
+    store = SessionStore(graphs_dir)
+    counts = rebuild_index(store)
+    print(f"🔁 索引を再構築しました: {store.corpus_dir}")
+    print(f"   セッション {counts['sessions']} / 概念 {counts['nodes']} 行 "
+          f"(併合後 {counts['corpus_nodes']}) / 関係 {counts['edges']} 行 "
+          f"(併合後 {counts['corpus_edges']}) / コーパス島 {counts['communities']}")
+
+
+def _print_search(query: str, graphs_dir: str | Path = layers_store.GRAPHS_DIR,
+                  limit: int = 8) -> None:
+    """--search: 索引の横断検索 (動作確認用の薄い口)。
+
+    回答生成は R2b-2 の QA 経路が行う。ここは「索引に何が入っているか」を
+    人が目で確かめるためのもの。
+    """
+    store = SessionStore(graphs_dir)
+    hits = store.search_nodes(query, limit=limit)
+    if not hits:
+        print(f"🔎 「{query}」に当たる概念・関係はありません "
+              f"(セッション {len(store.list_sessions())} 件を検索)")
+        return
+    print(f"🔎 「{query}」: {len(hits)} 件")
+    for hit in hits:
+        if hit["kind"] == "node":
+            print(f"   ● {hit['label']}  [{hit['session']} / {hit['node_id']}]"
+                  f"  重要度 {float(hit.get('importance') or 0.0):.2f}"
+                  f"  島 {hit.get('corpus_community') or '—'}"
+                  + ("  ← 完全一致" if hit.get("exact") else ""))
+        else:
+            print(f"   → {hit['from_norm']} —[{hit.get('glyph')}: "
+                  f"{hit.get('label') or '—'}]→ {hit['to_norm']}"
+                  f"  [{hit['session']} / {hit['edge_id']}]")
+            evidence = str(hit.get("evidence") or "").strip()
+            if evidence:
+                print(f"      根拠: {evidence[:70]}")
+
+
 def _run_edits(args: argparse.Namespace) -> None:
     """--edit / --edit-file / --revert-edit を適用し plan を再構成する。"""
     session, graphs_dir = _session_of(args.plan)
@@ -365,10 +417,24 @@ def main() -> None:
                     help="多層分析 (文脈ラベル・主張抽出・検証・論証) を行わない")
     ap.add_argument("--layers-summary", default=None, metavar="PLAN|SESSION",
                     help="生成済みセッションの多層分析を要約表示 (LLM 不要)")
+    # --- R2b 検索・スケール (R2b 設計書 §1) ---
+    ap.add_argument("--reindex", action="store_true",
+                    help="コーパス索引を再構築して件数を表示 (LLM 不要)")
+    ap.add_argument("--search", default=None, metavar="QUERY",
+                    help="全セッション横断で概念・関係を検索 (LLM 不要)")
     args = ap.parse_args()
 
     if args.layers_summary:
         _print_layers_summary(args.layers_summary)
+        return
+
+    # --- コーパス索引 (LLM 不要。索引は派生キャッシュ: 裁定 J) ---
+    if args.reindex:
+        _print_reindex()
+        if not args.search:
+            return
+    if args.search:
+        _print_search(args.search)
         return
 
     if args.setup_agents:
