@@ -18,10 +18,12 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from cc_core import layers_store
 from cc_core.causal import apply_relation_policy
 from cc_core.detail import build_multilevel_plan, check_level_bands, project
 from cc_core.evaluation import summarize
 from cc_core.gaps import detect_gaps
+from cc_core.layer_assign import assign_layer_tags
 from cc_core.layers import CAUSAL_GLYPH, apply_meta, verifier_id
 from cc_core.learning import (
     apply_learned,
@@ -34,6 +36,7 @@ from cc_core.mcp_client import extract_json
 from cc_core.normalize import normalize_kg
 from cc_core.svg_export import write_svg
 from cc_core.validate import validate_layout_plan
+from cc_orchestrator import analysis
 from cc_orchestrator.agents_def import AGENT_SPECS, MODELS
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
 from cc_orchestrator.ingest import bundle, ingest
@@ -53,6 +56,8 @@ STAGES: tuple[tuple[str, str], ...] = (
     ("routing", "経路判定"),
     ("ingest", "資料収集"),
     ("extract", "概念抽出"),
+    ("zone", "文脈ラベル付け"),
+    ("claims", "主張の抽出"),
     ("relate", "関係の検証"),
     ("detail", "詳細度の計算"),
     ("gaps", "ギャップ検出"),
@@ -109,6 +114,76 @@ def _causal_verifier(client: FoundryAgentsV2):
     return verify
 
 
+def _layers_stage(
+    client: FoundryAgentsV2 | None,
+    *,
+    session: str,
+    kg: dict[str, Any],
+    docs: list[Any],
+    kg_file: str | None,
+    layers: bool,
+    offline: bool,
+    progress: ProgressFn | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """R2a の ①文分割 ②zone ③claims (設計書 §5/§6/§9)。
+
+    戻り値は (layers サイドカー, summary["layers"])。status の語彙は 4 つ:
+
+      generated       LLM を呼んで新規に作った
+      reused          offline で元セッションのサイドカーを再利用した
+      skipped_offline offline で再利用できるサイドカーが無かった
+      disabled        layers=False (既定)
+
+    **層を作らない場合も進捗は必ず発火させる** (瞬時完了扱い)。進捗
+    チェックリストが途中で止まって見えると「固まった」と読まれるため。
+    """
+    def skip_progress() -> None:
+        _notify(progress, "zone")
+        _notify(progress, "claims")
+
+    def store(doc: dict[str, Any]) -> str | None:
+        """サイドカーを書く。**書けなくても地図の生成は続ける**。
+
+        層は付加情報なので、ディスク側の事故で地図そのものを失わせない
+        (書けなかった事実は summary に残る)。
+        """
+        try:
+            return str(layers_store.save(session, doc))
+        except OSError as exc:
+            logger.warning("layers sidecar not saved: %s", type(exc).__name__)
+            return None
+
+    if not layers:
+        skip_progress()
+        return None, {"status": "disabled"}
+
+    if offline or client is None:
+        # offline は LLM を呼べない。元セッション (kg_file の名前から辿る) の
+        # サイドカーがあれば再利用する — 層の情報は不変なので、同じ KG から
+        # 作り直す必要がない (§9)。
+        skip_progress()
+        source = layers_store.session_of_kg_file(kg_file)
+        if source and layers_store.exists(source):
+            doc = layers_store.load(source)
+            doc["session"] = session
+            logger.info("layers reused from session=%s", source)
+            return doc, {"status": "reused", "source_session": source,
+                         "stats": doc.get("stats", {}),
+                         # 新セッションでも自己完結させる (サイドカーを複製)
+                         "saved": store(doc)}
+        return None, {"status": "skipped_offline",
+                      "reason": "offline 実行で再利用できる layers_session がない"}
+
+    doc, report = analysis.analyze(
+        lambda prompt: client.run(analysis.AGENT, prompt),
+        session=session, kg=kg, docs=docs,
+        progress=lambda key: _notify(progress, key))
+    info: dict[str, Any] = {"status": "generated", "stats": doc.get("stats", {}),
+                            "saved": store(doc)}
+    info.update(report.to_dict())
+    return doc, info
+
+
 def run_pipeline(
     message: str,
     *,
@@ -134,11 +209,14 @@ def run_pipeline(
               False で ①抽出ヒント ②自動適用 ③因果上書き のすべてを止める。
               適用した場合は必ず summary["learned"] に内訳が出る (黙って直さない)。
     layers:   R2a の知識モデル多層化 (文分割 → zone → claims → 検証 → 論証) を
-              走らせるか (R2a 設計書 §9)。**M3〜M6 の実装が入るまで既定 False**
-              で、True にしても現時点では層の抽出は行われない。⑦meta
-              (polarity 充填・provenance・投影・layer_model 刻印) はこのフラグに
-              依らず常に走る — 層タグが無ければ投影は素通しなので、R1.5 と
-              同じ地図が出る。
+              走らせるか (R2a 設計書 §9)。**M7 でフリップするまで既定 False**。
+              True にすると ①資料を文へ切り ②cc-analysis で文脈ラベルと主張を
+              取り ③層タグを刻んで layers サイドカーを書く (検証 ⑤ と論証 ⑥ は
+              M5/M6)。offline では LLM を呼べないので、元セッションの
+              サイドカーがあれば再利用し、無ければ層抽出を飛ばして完走する。
+              ⑦meta (polarity 充填・provenance・投影・layer_model 刻印) はこの
+              フラグに依らず常に走る — 層タグが無ければ投影は素通しなので、
+              R1.5 と同じ地図が出る。
     """
     if offline and not kg_file:
         raise ValueError("offline モードは kg_file が必須です (LLM 抽出を行わないため)")
@@ -177,6 +255,7 @@ def run_pipeline(
     # ⑦meta の provenance に載せる抽出元。kg_file 経由は抽出 LLM を通って
     # いないので、モデル名を書くと出所を偽ることになる (§9)。
     extractor_model = "kg_file"
+    docs: list[Any] = []      # 文分割 (§5) の入力。kg_file 経由では手元に本文が無い
     if kg_file:
         kg, norm = normalize_kg(json.loads(Path(kg_file).read_text(encoding="utf-8")))
         summary["ingest"] = {"mode": "kg_file", "file": kg_file}
@@ -258,6 +337,13 @@ def run_pipeline(
     kg, learned_report = apply_learned(kg, learned_store, enabled=bool(learned))
     summary["learned"] = learned_report
 
+    # ---- R2a: 文脈ラベル付け + 主張の抽出 (設計書 §5/§6/§9) ----
+    # 層タグの刻印は ④relate の**後**に行う (降格後の glyph を見るため)。
+    # ここでは LLM 呼び出しと layers サイドカーの用意だけを済ませる。
+    layers_doc, summary["layers"] = _layers_stage(
+        client, session=session, kg=kg, docs=docs, kg_file=kg_file,
+        layers=layers, offline=offline, progress=progress)
+
     # ---- ④ Relate: 因果3点セット + 矛盾の非断定化 (裁定 7) ----
     # フック 3: causal_override が付いた対は 3 点セットを走らせず確定させる
     # (apply_relation_policy が edge["causal_override"] を見る)。
@@ -287,13 +373,13 @@ def run_pipeline(
     # polarity 充填 / provenance / 層タグ→glyph 投影 / layer_model 刻印 を
     # **KG 保存の直前**に 1 回だけ行う。層タグがまだ無い世代 (R1.5 と
     # layers=False の run) では投影は素通しなので、glyph も座標も変わらない。
-    if layers:
-        # M3〜M6 で ①文分割 ②zone ③claims ④検証 ⑤論証 が入る。
-        # 実装前に True で呼ばれても黙って成功させない (何が起きたか残す)。
-        summary["layers"] = {"status": "not_implemented"}
-        logger.warning("layers=True は M3 以降で実装予定 (この run では層抽出を行わない)")
-    else:
-        summary["layers"] = {"status": "disabled"}
+    # 層タグの刻印 (§8 の (1)(3)(4)) は ④relate の後・⑦meta の前。降格後の
+    # glyph を初期タグにするので、LLM が何も足さなければ記号は動かない。
+    if layers_doc is not None:
+        summary["layers"]["assigned"] = assign_layer_tags(
+            kg, zones=layers_doc.get("zones", ()),
+            claims=layers_doc.get("claims", ()),
+            ontology=layers_doc.get("ontology"))
     summary["meta"] = apply_meta(kg, extractor_model=extractor_model,
                                  validator_ids=validator_ids)
 

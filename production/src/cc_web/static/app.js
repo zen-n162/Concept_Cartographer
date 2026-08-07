@@ -15,6 +15,7 @@
   // cc_orchestrator.pipeline.STAGES と同じ並び (進捗チェックリスト用)
   var STAGES = [
     ["routing", "経路判定"], ["ingest", "資料収集"], ["extract", "概念抽出"],
+    ["zone", "文脈ラベル付け"], ["claims", "主張の抽出"],
     ["relate", "関係の検証"], ["detail", "詳細度の計算"], ["gaps", "ギャップ検出"],
     ["render", "描画"], ["verify", "独立検証"], ["export", "出力"]
   ];

@@ -542,10 +542,15 @@ def test_pipeline_defaults_to_layers_off(offline_run) -> None:
     assert summary["layers"]["status"] == "disabled"
 
 
-def test_pipeline_layers_flag_is_honest_before_m3(offline_run) -> None:
-    """未実装のものを黙って成功にしない。"""
+def test_pipeline_layers_flag_is_honest_when_it_cannot_run(offline_run) -> None:
+    """やらなかったことを黙って成功にしない。
+
+    offline は LLM を呼べない。再利用できるサイドカーも無い (fixture の
+    kg_file は kg_session_* 命名ではない) ので、理由の分かる status を返す。
+    """
     summary, _, _ = offline_run(layers=True)
-    assert summary["layers"]["status"] == "not_implemented"
+    assert summary["layers"]["status"] == "skipped_offline"
+    assert summary["layers"]["reason"]
 
 
 def test_pipeline_meta_runs_regardless_of_layers_flag(offline_run) -> None:
