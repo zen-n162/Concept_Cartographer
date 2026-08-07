@@ -90,7 +90,25 @@ NEIGHBOUR_SENTENCES = 3
 
 # cc-verification は描画検証用の instructions と tools を持つ (裁定 E で流用)。
 # 何も言わないと `verify_scene` を呼びに行くので、先に釘を刺す【実測 2026-08-07】。
+#
+# M7 (裁定 I) で instructions 側にも task 分岐を入れた — 入力 JSON に
+# `"task": "nli" | "claim_check"` があればツールを呼ばず純 JSON で答える契約
+# (agents_def.VERIFICATION_INSTRUCTIONS)。この 1 行は**契約が積まれていない
+# 旧バージョンのエージェントに当たったときの保険**として残す。プロンプト側と
+# instructions 側の二重掛けにしておくと、ensure_agents が新版を積む前の run
+# でも verify_scene を呼びに行かない。
 NO_TOOLS_NOTE = "ツールは呼ばず、以下のテキストだけを見て判断してください。\n"
+
+
+def _payload(task: str, **body: Any) -> str:
+    """cc-verification へ渡す入力 (裁定 I)。JSON 1 個だけを送る。
+
+    形は cc-analysis の呼び出し (analysis._payload) と揃えてある。task 名で
+    分岐させるので、検証器を足すときも instructions に節を 1 つ増やすだけで済む。
+    """
+    return (NO_TOOLS_NOTE
+            + "次の JSON を処理し、JSON のみで応答してください。\n"
+            + json.dumps({"task": task, **body}, ensure_ascii=False))
 
 
 class VerifierError(RuntimeError):
@@ -142,8 +160,11 @@ def validate_max_calls() -> int:
     「30 call/run 以下」と噛み合わない。そこで**呼び出し数の側にも栓**を付けた。
     使い切った後の対象は決定的検証だけを受け、uncertain (要レビュー) になる —
     黙って validated にしないのが要点。
+
+    既定 16 は裁定 G の逆算 (zone 8 + claims 2 + validate 16 + cgw 2 +
+    refutes 1 = 29 ≤ 30)。1 対象 2 call なので 8 対象ぶんが LLM 検証を受ける。
     """
-    return _knob("CC_VALIDATE_MAX_CALLS", 20)
+    return _knob("CC_VALIDATE_MAX_CALLS", 16)
 
 
 def nli_verifier_id(model: str) -> str:
@@ -186,17 +207,9 @@ class LLMNLIVerifier:
         self.verifier_id = nli_verifier_id(model)
 
     def prompt(self, premise: str, hypothesis: str) -> str:
-        return (
-            "前提と仮説の含意関係を判定してください。\n"
-            f"{NO_TOOLS_NOTE}"
-            "entails = 前提から仮説が導ける / contradicts = 前提と仮説が両立しない / "
-            "neutral = どちらとも言えない (前提に情報が足りない)。\n"
-            "前提に書かれていないことを補って entails にしないでください。\n"
-            f"前提 (資料の原文): {_trim(premise, MAX_PREMISE_CHARS)}\n"
-            f"仮説 (検証したい主張): {_trim(hypothesis, MAX_HYPOTHESIS_CHARS)}\n"
-            'JSON のみで回答: {"label": "entails|neutral|contradicts", '
-            '"score": <0.0〜1.0>, "rationale": "<40字以内>"}'
-        )
+        return _payload("nli",
+                        premise=_trim(premise, MAX_PREMISE_CHARS),
+                        hypothesis=_trim(hypothesis, MAX_HYPOTHESIS_CHARS))
 
     def check(self, premise: str, hypothesis: str) -> VerifierResult:
         try:
@@ -285,16 +298,9 @@ class LLMClaimVerifier:
         self.verifier_id = llm_verifier_id(model)
 
     def prompt(self, premise: str, hypothesis: str) -> str:
-        return (
-            "次の主張が根拠テキストに支持されるか判定してください。\n"
-            f"{NO_TOOLS_NOTE}"
-            "支持と認めるのは、主張の内容が根拠テキストに**明示**されている場合"
-            "のみです。言い換えや一般化による補完、推測は支持と認めません。\n"
-            f"主張: {_trim(hypothesis, MAX_HYPOTHESIS_CHARS)}\n"
-            f"根拠テキスト: {_trim(premise, MAX_PREMISE_CHARS)}\n"
-            'JSON のみで回答: {"supported": true|false, '
-            '"confidence": <0.0〜1.0>, "why": "<30字以内>"}'
-        )
+        return _payload("claim_check",
+                        claim=_trim(hypothesis, MAX_HYPOTHESIS_CHARS),
+                        evidence=_trim(premise, MAX_PREMISE_CHARS))
 
     def check(self, premise: str, hypothesis: str) -> VerifierResult:
         try:
@@ -310,11 +316,16 @@ class LLMClaimVerifier:
             raise VerifierError(
                 "独立 LLM 検証器が supported を返さなかった (別の契約で応答した可能性)")
         supported = bool(raw.get("supported"))
+        # 裁定 I の契約は {"supported", "score", "rationale"}。M6 までの
+        # {"confidence", "why"} でも読めるようにしておく (どちらも同じ意味)
+        confidence = raw.get("score")
+        if confidence is None:
+            confidence = raw.get("confidence")
         return {"label": "supported" if supported else "unsupported",
-                "score": _blend(1.0 if supported else 0.0,
-                                _clamp(raw.get("confidence"))),
+                "score": _blend(1.0 if supported else 0.0, _clamp(confidence)),
                 "verifier_id": self.verifier_id,
-                "detail": _trim(raw.get("why") or raw.get("detail"), 80)}
+                "detail": _trim(raw.get("rationale") or raw.get("why")
+                                or raw.get("detail"), 80)}
 
 
 class OntologyChecker:

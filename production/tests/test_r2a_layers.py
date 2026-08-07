@@ -536,10 +536,16 @@ def offline_run(tmp_path, monkeypatch):
     return _run
 
 
-def test_pipeline_defaults_to_layers_off(offline_run) -> None:
-    """M1〜M6 の間は layers=False が既定 (本番挙動は R1.5 のまま)。"""
+def test_pipeline_defaults_to_layers_on(offline_run) -> None:
+    """M7 で既定を layers=True へフリップした (R2a 設計書 §9 / §12)。
+
+    offline かつ再利用できるサイドカーが無いので status は skipped_offline に
+    なるが、**disabled ではない** = 層の段を回そうとした、が読み取れる。
+    `layers=False` を明示したときだけ disabled になる。
+    """
     summary, _, _ = offline_run()
-    assert summary["layers"]["status"] == "disabled"
+    assert summary["layers"]["status"] == "skipped_offline"
+    assert offline_run(layers=False)[0]["layers"] == {"status": "disabled"}
 
 
 def test_pipeline_layers_flag_is_honest_when_it_cannot_run(offline_run) -> None:

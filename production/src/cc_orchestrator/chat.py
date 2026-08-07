@@ -26,6 +26,11 @@
   python -m cc_orchestrator.chat --plan <plan.json> --list-edits
   python -m cc_orchestrator.chat --plan <plan.json> --revert-edit e-20260807-001
 
+  # 多層分析 (R2a。既定 ON)
+  python -m cc_orchestrator.chat "今週の研究を..." --no-layers      # 切る
+  python -m cc_orchestrator.chat --layers-summary graphs/layout_plan_session_X.json
+  python -m cc_orchestrator.chat --layers-summary 20260807_120000
+
   # 過去の修正からの学習
   python -m cc_orchestrator.chat --show-learned
   python -m cc_orchestrator.chat --relearn
@@ -43,10 +48,12 @@ import os
 import sys
 from pathlib import Path
 
+from cc_core import layers_store
 from cc_core.community import expand_aggregate
 from cc_core.detail import project
 from cc_core.editing import (
     EditError,
+    KG_PREFIX,
     PLAN_PREFIX,
     annotate_edits,
     append_edit,
@@ -54,6 +61,7 @@ from cc_core.editing import (
     rebuild_session,
 )
 from cc_core.gaps import apply_decision, usefulness_rate
+from cc_core.verifiers import rejection_path
 from cc_core.learning import (
     cue_warnings,
     load_learned,
@@ -113,9 +121,23 @@ def _print_summary(s: dict) -> None:
     if lr.get("enabled"):
         print(f"🎓 {report_line(lr)}"
               + (" (詳細は summary.learned.details)" if lr.get("details") else ""))
+    ly = s.get("layers") or {}
+    if ly.get("status") and ly["status"] != "disabled":
+        st = ly.get("stats") or {}
+        va = s.get("validation") or {}
+        print(f"🧩 多層分析 [{ly['status']}]: 文 {st.get('sentences', 0)} / "
+              f"ラベル {st.get('zoned', 0)} / 主張 {st.get('claims', 0)}"
+              f" (検証済 {st.get('validated', 0)} / 却下 {st.get('rejected', 0)})"
+              f" / 矛盾 {st.get('refutes', 0)} / LLM {st.get('llm_calls', 0)} call"
+              + (f"   rejection_log: {va['rejection_log']}"
+                 if va.get("rejection_log") else ""))
     gp = s.get("gaps", {})
     if gp:
         print(f"❓ ギャップ候補: {gp['candidates']} 件 {gp['by_type']}")
+        if gp.get("by_gap_type"):
+            kinds = gp["by_gap_type"]
+            print(f"   型: 構造 {kinds.get('structural', 0)} / "
+                  f"言説 {kinds.get('discourse', 0)} / 因果 {kinds.get('causal', 0)}")
     ver = s.get("verification", {})
     mark = "✅" if s.get("status") == "success" else "❌"
     print(f"{mark} 検証: {ver.get('verdict')}  {ver.get('summary', '')}")
@@ -185,6 +207,71 @@ def _print_learned(store: dict) -> None:
         print(f"   ⚠ {w}")
     print("   ※ 「学習」はモデルの再学習ではありません。用語辞書・除外リスト・"
           "因果上書きの決定的な適用と、抽出プロンプトへの注意書き注入です。")
+
+
+def _layers_target(target: str) -> tuple[str, Path]:
+    """--layers-summary の引数から (セッション ID, graphs ディレクトリ) を取る。
+
+    plan / kg / layers のどのファイル名でも、素のセッション ID でも受ける。
+    「どれを渡せばいいか」を利用者に覚えさせないため。
+    """
+    path = Path(target)
+    if path.suffix != ".json":
+        return target, Path(layers_store.GRAPHS_DIR)
+    stem = path.stem
+    for prefix in (PLAN_PREFIX, KG_PREFIX, layers_store.LAYERS_PREFIX):
+        if stem.startswith(prefix):
+            return stem[len(prefix):], path.parent
+    return stem, path.parent
+
+
+def _print_layers_summary(target: str) -> None:
+    """--layers-summary: layers サイドカーの要約 (LLM 不要・R2a 設計書 §10)。
+
+    Web の結果カード (主張 n 件・検証済 m 件・矛盾 k 件) と同じ数を CLI でも
+    見られるようにする。rejection_log は**パスを出すだけ**にせず件数も数える —
+    「何が落ちたか」を追う入口がここになるため。
+    """
+    session, graphs_dir = _layers_target(target)
+    if not layers_store.exists(session, graphs_dir=graphs_dir):
+        sys.exit(f"❌ layers サイドカーがありません: "
+                 f"{layers_store.path(session, graphs_dir=graphs_dir)}\n"
+                 "   この地図は R2a 以前の生成か、多層分析を切って生成されています。")
+    doc = layers_store.load(session, graphs_dir=graphs_dir)
+    st = doc.get("stats") or {}
+    print(f"🧩 多層分析 session={session} (v{doc.get('version')} / "
+          f"splitter={doc.get('splitter')})")
+    print(f"   文 {st.get('sentences', 0)} → ラベル {st.get('zoned', 0)} / "
+          f"主張 {st.get('claims', 0)} (検証済 {st.get('validated', 0)} / "
+          f"却下 {st.get('rejected', 0)}) / 論証 {st.get('arguments', 0)} / "
+          f"矛盾 {st.get('refutes', 0)} / LLM {st.get('llm_calls', 0)} call")
+
+    claims = [c for c in doc.get("claims") or [] if isinstance(c, dict)]
+    mark = {"validated": "✅", "uncertain": "△", "rejected": "✖"}
+    for claim in claims[:12]:
+        validation = claim.get("validation") or {}
+        status = str(validation.get("status") or "—")
+        combined = validation.get("combined")
+        text = str((claim.get("assertion") or {}).get("claim_text") or "")
+        print(f"   {mark.get(status, '·')} [{status}"
+              + (f" {combined:.2f}" if isinstance(combined, (int, float)) else "")
+              + f"] {text[:56]}")
+    if len(claims) > 12:
+        print(f"   … 他 {len(claims) - 12} 件")
+
+    refutes = [r for r in doc.get("refutes") or []
+               if isinstance(r, dict) and r.get("verdict") == "refutes"]
+    if refutes:
+        print(f"   ⚡ 矛盾 {len(refutes)} 組:")
+        for record in refutes[:5]:
+            print(f"      · {str(record.get('rationale') or '')[:60]}")
+
+    log = rejection_path(session)
+    if log.exists():
+        rows = [ln for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        print(f"   📄 rejection_log: {log} ({len(rows)} 行)")
+    else:
+        print("   📄 rejection_log: なし (却下された主張・因果候補はありません)")
 
 
 def _run_edits(args: argparse.Namespace) -> None:
@@ -273,7 +360,16 @@ def main() -> None:
                     help="編集ログから learned.json を再構成")
     ap.add_argument("--no-learned", action="store_true",
                     help="過去の修正からの学習を適用しない")
+    # --- R2a 知識モデル多層化 (R2a 設計書 §10) ---
+    ap.add_argument("--no-layers", action="store_true",
+                    help="多層分析 (文脈ラベル・主張抽出・検証・論証) を行わない")
+    ap.add_argument("--layers-summary", default=None, metavar="PLAN|SESSION",
+                    help="生成済みセッションの多層分析を要約表示 (LLM 不要)")
     args = ap.parse_args()
+
+    if args.layers_summary:
+        _print_layers_summary(args.layers_summary)
+        return
 
     if args.setup_agents:
         print(json.dumps(ensure_agents(FoundryAgentsV2()), indent=2, ensure_ascii=False))
@@ -377,7 +473,7 @@ def main() -> None:
                 message, target=args.target, paths=args.path, kg_file=args.kg,
                 local_only=args.local_only, detail_level=args.level,
                 verify_causal=not args.no_causal_verify, export_svg=not args.no_svg,
-                learned=not args.no_learned)
+                learned=not args.no_learned, layers=not args.no_layers)
         except Exception as exc:
             print(f"❌ 失敗: {type(exc).__name__}: {exc}", file=sys.stderr)
             return

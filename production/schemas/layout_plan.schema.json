@@ -618,12 +618,43 @@
           },
           "presumed_type": {
             "type": "string",
+            "description": "原因の推定 (R1 から。gap_type とは別の軸)",
             "enum": [
               "data",
               "extraction",
               "true",
               "unknown"
             ]
+          },
+          "gap_type": {
+            "type": "string",
+            "description": "検出信号の種類 (R2a 設計書 §9 のギャップ 3 型)",
+            "enum": [
+              "structural",
+              "discourse",
+              "causal"
+            ]
+          },
+          "detected_from_layer": {
+            "type": "string",
+            "description": "どの層/構造から見つけたか (L4-L6 / layer_B / layer_C)"
+          },
+          "detection_signal": {
+            "type": "string",
+            "description": "検出信号の要約 (degree=0 / claim_refs=3, layer_B:method_of=0 等)"
+          },
+          "toulmin": {
+            "type": "object",
+            "description": "判断材料 (R2a §9)。grounds=何を見たか / warrant=どの規則で判断したか",
+            "additionalProperties": false,
+            "properties": {
+              "grounds": {
+                "type": "string"
+              },
+              "warrant": {
+                "type": "string"
+              }
+            }
           },
           "reason": {
             "type": "string"

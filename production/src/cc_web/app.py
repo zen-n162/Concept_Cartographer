@@ -82,6 +82,7 @@ class JobRequest(BaseModel):
     target: str = "local"
     offline: bool = False
     learned: bool = True     # 過去の修正からの学習を適用するか (§8.1)
+    layers: bool = True      # 多層分析 (R2a 設計書 §10)。M7 で既定 ON
 
 
 class GapDecisionRequest(BaseModel):
@@ -261,6 +262,7 @@ def create_app() -> FastAPI:
             "target": req.target,
             "offline": req.offline,
             "learned": req.learned,
+            "layers": req.layers,
             "kg_file": _resolve_kg_file(req.kg_file) if req.kg_file else None,
         }
         if req.offline and not params["kg_file"]:
@@ -331,6 +333,19 @@ def create_app() -> FastAPI:
         _session_or_404(session)
         _check_level(level)
         return sessions_mod.view_of(session, level)
+
+    @app.get("/api/sessions/{session}/layers")
+    def api_session_layers(session: str) -> dict[str, Any]:
+        """多層分析のサイドカー (R2a 設計書 §10)。
+
+        R2a 以前に作った地図には存在しないので、その場合は 404 + 理由。
+        エラーではなく「この地図は古い世代」であることを本文で伝える。
+        """
+        _session_or_404(session)
+        try:
+            return sessions_mod.layers_of(session)
+        except sessions_mod.LayersNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/sessions/{session}/gaps/{gap_id}")
     def api_gap_decision(session: str, gap_id: str,

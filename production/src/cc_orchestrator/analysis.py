@@ -12,13 +12,26 @@ normalize.py と同じ思想で、LLM 出力は指示どおりの形で返ると
 上限は環境変数で絞れる (§6・受け入れ基準 5「LLM 呼び出しが 30 call/run 以下」):
 
   CC_ZONE_BATCH          1 call あたりの文数            (既定 50)
-  CC_ZONE_MAX_SENTENCES  ゾーニングする文の総数上限     (既定 500)
+  CC_ZONE_MAX_SENTENCES  ゾーニングする文の総数上限     (既定 400)
   CC_CLAIMS_MAX          主張の件数上限                 (既定 40)
   CC_CLAIMS_BATCH        claims 1 call あたりの文数     (既定 60)
-  CC_CLAIMS_MAX_CALLS    claims の call 数上限          (既定 3)
+  CC_CLAIMS_MAX_CALLS    claims の call 数上限          (既定 2)
   CC_CGW_BATCH           cgw 1 call あたりの主張数      (既定 20)
   CC_CGW_MAX_CALLS       cgw の call 数上限             (既定 2)
   CC_REFUTES_MAX_PAIRS   矛盾を問う候補ペアの上限       (既定 30)
+
+**既定値は「最悪でも合計 30 call/run 以下」から逆算してある** (裁定 G)。
+設計書 §6 は CC_ZONE_MAX_SENTENCES=500 と書いていたが、それだと zone だけで
+10 call になり、他段と足して上限を超えうる。M7 で実測に合わせて 400 へ縮めた:
+
+  zone      400 文 / 50 = 8 call
+  claims    CC_CLAIMS_MAX_CALLS                    2 call
+  validate  CC_VALIDATE_MAX_CALLS (verifiers.py)  16 call
+  cgw       CC_CGW_MAX_CALLS                       2 call
+  refutes   1 回だけ                                1 call
+                                            合計  29 call (最悪値)
+
+実測は summary["layers"]["stats"]["llm_calls"] に出る。
 """
 
 from __future__ import annotations
@@ -96,7 +109,8 @@ def zone_batch() -> int:
 
 
 def zone_max_sentences() -> int:
-    return _knob("CC_ZONE_MAX_SENTENCES", 500)
+    """ゾーニングする文の総数上限 (裁定 G: 400 = zone を 8 call に収める)。"""
+    return _knob("CC_ZONE_MAX_SENTENCES", 400)
 
 
 def claims_max() -> int:
@@ -108,7 +122,8 @@ def claims_batch() -> int:
 
 
 def claims_max_calls() -> int:
-    return _knob("CC_CLAIMS_MAX_CALLS", 3)
+    """claims の call 数上限 (裁定 G: 3 -> 2)。"""
+    return _knob("CC_CLAIMS_MAX_CALLS", 2)
 
 
 @dataclass

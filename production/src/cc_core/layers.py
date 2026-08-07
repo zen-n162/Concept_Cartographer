@@ -282,6 +282,9 @@ def apply_glyph_projection(edge: dict[str, Any]) -> str:
     規則⑩ で降格したときは `causal_check.demoted_from = "arrow"` を残す。
     evaluation.causal_precision_log がこの印を数えているので、層タグ経由の
     降格でも KPI の連続性が保たれる (設計書 §4 / §9)。
+
+    逆に規則③ で ⚡ に**戻った**ときは、R1 の「矛盾は非断定へ降格」の記録を
+    畳む — 投影が最終的な記号を決める段なので、そこと食い違う説明を残さない。
     """
     projected = project_glyph(edge)
     if demoted_by_projection(edge, projected):
@@ -292,5 +295,15 @@ def apply_glyph_projection(edge: dict[str, Any]) -> str:
         check["demoted_from"] = CAUSAL_GLYPH
         check.setdefault("reason", "層タグは causes だが裏付けが不足 (投影で相関へ降格)")
         edge["causal_check"] = check
+    elif projected == "zigzag":
+        # ④relate は矛盾候補を毎回 tension へ落として「矛盾判定は L8 (R2) で
+        # 行う」と書く (裁定 7)。層 D に refutes を持つエッジを再実行すると、
+        # その記録が ⚡ の説明として残ってしまう — クリック展開に
+        # 「候補として非断定表示」と出て、表示している ⚡ と食い違う
+        # 【実測: layers 再利用の offline 再実行で発生】。
+        check = edge.get("causal_check")
+        if isinstance(check, dict) and check.get("demoted_from") == "zigzag":
+            check.pop("demoted_from", None)
+            check["reason"] = "層 D の refutes により矛盾として断定 (投影規則③)"
     edge["glyph"] = projected
     return projected

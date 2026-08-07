@@ -22,7 +22,7 @@ from cc_core import layer_assign, layers_store, verifiers
 from cc_core.causal import apply_relation_policy
 from cc_core.detail import build_multilevel_plan, check_level_bands, project
 from cc_core.evaluation import summarize
-from cc_core.gaps import detect_gaps
+from cc_core.gaps import GAP_KINDS, GAP_TYPES, detect_gaps
 from cc_core.layer_assign import assign_layer_tags
 from cc_core.layers import CAUSAL_GLYPH, apply_meta, verifier_id
 from cc_core.learning import (
@@ -91,29 +91,71 @@ def ensure_agents(client: FoundryAgentsV2) -> dict[str, str]:
     return names
 
 
+# 因果の独立検証で「契約違反の応答」を受けたエッジに立てる一時印 (R1.5 の潜在不具合)。
+# apply_relation_policy が返した後に _mark_verifier_errors が回収して消す。
+VERIFIER_ERROR_FLAG = "_causal_verifier_error"
+VERIFIER_ERROR_CODE = "verifier_error"
+
+
 def _causal_verifier(client: FoundryAgentsV2):
     """独立検証器 (裁定 7 の 3 点目)。描画検証と同じ「別モデル判定」パターン。
 
     cc-verification (gpt-5.6-terra) に因果の可否だけを判定させる。抽出側
     (gpt-5.6-sol) とは別モデルなので、同一モデルの自己確認にならない。
+
+    **応答に "causal" キーが無い場合の扱い** (R1.5 からの潜在不具合の修正):
+    `bool(res.get("causal"))` だと「答えていない」が「因果ではない」と同じ
+    結論になり、エージェントの結線ミスが静かに全件降格へ化ける
+    (verifiers.LLMNLIVerifier.repair と同じ事故)。
+
+    **結論は変えない** — 検証器が答えられなかった因果を通すほうが危険なので、
+    安全側 (fail-closed) で降格させる。ただし `causal_check` に
+    `reason_code: "verifier_error"` を残し、**本物の否定と区別できる**ように
+    する。区別が要るのは、KPI で「検証器が否定した」と「検証器が壊れていた」を
+    混ぜると、モデル障害が「因果の抽出精度が低い」に見えてしまうため。
     """
     def verify(edge: dict[str, Any], evidence_text: str) -> bool:
         prompt = (
-            "次の関係が『因果』と言えるか判定してください。\n"
-            "因果と認めるのは、根拠テキストに機序の記述・介入・反事実の"
-            "いずれかが**明示**されている場合のみです。相関・併存・時間的前後"
-            "だけでは因果と認めません。\n"
-            f"関係: {edge.get('from')} → {edge.get('to')} 「{edge.get('label', '')}」\n"
-            f"根拠テキスト: {evidence_text[:600]}\n"
-            'JSON のみで回答: {"causal": true|false, "why": "<30字以内>"}'
+            "次の JSON を処理し、JSON のみで応答してください。\n"
+            + json.dumps({"task": "causal_check",
+                          "relation": f"{edge.get('from')} → {edge.get('to')}"
+                                      f" 「{edge.get('label', '')}」",
+                          "evidence": evidence_text[:600]}, ensure_ascii=False)
         )
         try:
             res = extract_json(client.run("cc-verification", prompt))
-            return bool(res.get("causal"))
         except Exception as exc:
             logger.warning("causal verifier error: %s", type(exc).__name__)
             raise
+        if not isinstance(res, dict) or "causal" not in res:
+            # edge は apply_relation_policy が作った複製で、そのまま kg に載る。
+            # ここに印を付けておけば呼び出し側が後から回収できる
+            edge[VERIFIER_ERROR_FLAG] = VERIFIER_ERROR_CODE
+            logger.warning("causal verifier contract violation (no 'causal' key)")
+            return False
+        return bool(res.get("causal"))
     return verify
+
+
+def _mark_verifier_errors(kg: dict[str, Any]) -> int:
+    """`_causal_verifier` が立てた印を causal_check の理由へ畳む。
+
+    印そのものは kg に残さない (保存形に `_` 始まりのキーを増やさない)。
+    """
+    marked = 0
+    for edge in kg.get("edges", []) or ():
+        if not isinstance(edge, dict) or not edge.pop(VERIFIER_ERROR_FLAG, None):
+            continue
+        check = edge.get("causal_check")
+        if not isinstance(check, dict):
+            continue
+        check["reason_code"] = VERIFIER_ERROR_CODE
+        check["reason"] = ("独立検証器が契約どおりに応答しなかった "
+                           "(causal キー無し) — 安全側で相関へ降格")
+        marked += 1
+    if marked:
+        logger.warning("causal verifier contract violations: %d edges", marked)
+    return marked
 
 
 def _layers_stage(
@@ -275,7 +317,7 @@ def run_pipeline(
     progress: ProgressFn | None = None,
     offline: bool = False,
     learned: bool = True,
-    layers: bool = False,
+    layers: bool = True,
 ) -> dict[str, Any]:
     """概念地図生成の全経路。
 
@@ -287,7 +329,8 @@ def run_pipeline(
               False で ①抽出ヒント ②自動適用 ③因果上書き のすべてを止める。
               適用した場合は必ず summary["learned"] に内訳が出る (黙って直さない)。
     layers:   R2a の知識モデル多層化 (文分割 → zone → claims → 検証 → 論証) を
-              走らせるか (R2a 設計書 §9)。**M7 でフリップするまで既定 False**。
+              走らせるか (R2a 設計書 §9)。**M7 で既定 True へフリップ済み**
+              (CLI は `--no-layers`、Web は設定モーダルの「多層分析」で切れる)。
               True にすると ①資料を文へ切り ②cc-analysis で文脈ラベルと主張を
               取り ③層タグを刻み ⑤3 検証器で主張と因果候補を検証し ⑥論証と
               内部矛盾を判定して layers サイドカーを書く。offline では
@@ -431,21 +474,15 @@ def run_pipeline(
     _notify(progress, "relate")
     verifier = _causal_verifier(client) if (verify_causal and client) else None
     kg, causal_stats = apply_relation_policy(kg, verifier=verifier)
+    # 検証器の契約違反を「本物の否定」と区別できる形にする (降格の結論は維持)
+    verifier_errors = _mark_verifier_errors(kg)
+    if verifier_errors:
+        causal_stats["verifier_errors"] = verifier_errors
     summary["relation_policy"] = causal_stats
     # provenance.validator_ids は**実際に走った**検証器だけを並べる (§9)。
     # offline / verify_causal=False では空 = 「何も検証していない」が正しい記録。
     validator_ids = ([verifier_id(MODELS["verification"])]
                      if verifier is not None else [])
-
-    # 因果として維持された語彙証拠を数える (§5.1 cue_stats)。R1 は記録のみで、
-    # 閾値を超えた語彙の扱いは人が判断する (§12)。
-    if learned:
-        try:
-            note_cues_kept([hit for e in kg.get("edges", [])
-                            if e.get("glyph") == CAUSAL_GLYPH
-                            for hit in (e.get("causal_check") or {}).get("lexicon_hit", [])])
-        except OSError as exc:  # 統計が書けなくても生成は続ける
-            logger.warning("cue_stats not recorded: %s", type(exc).__name__)
 
     # ---- ⑦meta: 決定的なメタ情報の書き込み (R2a 設計書 §9) ----
     # 独立した STAGE にはしない — LLM 呼び出しが無く、進捗に出す意味がない。
@@ -483,6 +520,19 @@ def run_pipeline(
     summary["meta"] = apply_meta(kg, extractor_model=extractor_model,
                                  validator_ids=validator_ids)
 
+    # 因果として維持された語彙証拠を数える (§5.1 cue_stats)。R1 は記録のみで、
+    # 閾値を超えた語彙の扱いは人が判断する (§12)。
+    # **⑦meta の後**に置く (裁定 H)。投影が終わった後の glyph で数えるので、
+    # 層タグ経由で降格した causes 候補の語彙が「因果として維持された」に
+    # 混ざらない。layers=False の run では投影が素通しなので集計は変わらない。
+    if learned:
+        try:
+            note_cues_kept([hit for e in kg.get("edges", [])
+                            if e.get("glyph") == CAUSAL_GLYPH
+                            for hit in (e.get("causal_check") or {}).get("lexicon_hit", [])])
+        except OSError as exc:  # 統計が書けなくても生成は続ける
+            logger.warning("cue_stats not recorded: %s", type(exc).__name__)
+
     # ---- 原本 KG の保存 (編集の base) ----
     # **関係ポリシー適用後**を保存するのが要点。ここが利用者に見えている状態で
     # あり、編集はこの上に積まれる。ポリシー適用**前**を base にすると、
@@ -512,12 +562,17 @@ def run_pipeline(
 
     # ---- ギャップ候補 (裁定 8) ----
     _notify(progress, "gaps")
-    gap_list = detect_gaps(kg)
+    # rejection_log は「なぜ矢印にならなかったか」の原文。因果ギャップの出典に
+    # 添えるだけで、検出そのものは kg 内の validation から決まる (§9)。
+    gap_list = detect_gaps(
+        kg, rejection_log=(summary.get("validation") or {}).get("rejection_log"))
     plan["gaps"] = [g.to_dict() for g in gap_list]
     summary["gaps"] = {
         "candidates": len(gap_list),
         "by_type": {t: sum(1 for g in gap_list if g.presumed_type == t)
-                    for t in ("data", "extraction", "true", "unknown")},
+                    for t in GAP_TYPES},
+        "by_gap_type": {k: sum(1 for g in gap_list if g.gap_type == k)
+                        for k in GAP_KINDS},
     }
 
     check = validate_layout_plan(plan)

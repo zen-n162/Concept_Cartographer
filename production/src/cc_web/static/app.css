@@ -232,6 +232,16 @@ button:disabled { cursor:default; }
            background:var(--indigo-50); color:var(--indigo-700); }
 .chip-sm.green { background:var(--green-50); color:var(--green-700); }
 .chip-sm.grey { background:#F2F1EC; color:var(--muted); }
+/* ギャップの型バッジ (R2a 設計書 §9)。構造=既定の藍、言説=緑、因果=桃 */
+.chip-sm.kind-structural { background:var(--indigo-50); color:var(--indigo-700); }
+.chip-sm.kind-discourse { background:var(--green-50); color:var(--green-700); }
+.chip-sm.kind-causal { background:var(--pink-50); color:var(--pink-700); }
+
+/* クリック展開の機械タグ (R2a 設計書 §10)。内部 30 種を畳まずに見せる箇所 */
+.tag-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:4px 0; }
+.tag { font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+       border-radius:6px; padding:2px 6px; background:var(--indigo-50);
+       color:var(--indigo-700); }
 
 .tabs { display:flex; gap:2px; border-bottom:var(--hairline); margin-bottom:12px; }
 .tab { font-size:12px; padding:7px 12px; border-radius:8px 8px 0 0; color:var(--muted); }

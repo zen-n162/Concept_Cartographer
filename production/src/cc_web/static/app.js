@@ -38,8 +38,27 @@
   var GAP_TYPE_LABEL = {
     data: "データ不足", extraction: "抽出漏れ", true: "真の空白", unknown: "未分類"
   };
-  // 編集で選べる関係の種類 (設計書 §8.2「因果⇄相関⇄対立」)
-  var EDIT_GLYPHS = [["arrow", "因果"], ["wave", "相関"], ["tension", "対立候補"]];
+  // ギャップの検出信号の種類 (R2a 設計書 §9)。presumed_type とは別の軸
+  var GAP_KIND_LABEL = {
+    structural: "構造", discourse: "言説", causal: "因果"
+  };
+  // 層タグの見出し (R2a 設計書 §1 の 4 層 30 種)。クリック展開で
+  // 「UI は 8 記号、内部は 30 種」を見せるために使う
+  var LAYER_LABEL = {
+    layer_A: "A オントロジー", layer_B: "B 言説・構造",
+    layer_C: "C 意味・因果", layer_D: "D 認識論・修辞"
+  };
+  var VALIDATION_LABEL = {
+    validated: "検証済み", uncertain: "要レビュー", rejected: "却下"
+  };
+  // 編集で選べる関係の種類 (R2a 設計書 §10: 8 種)。
+  // hole (ギャップ候補) と tension (非断定の対立候補) は**選択肢に出さない** —
+  // どちらも「機械がまだ判断できていない」という内部状態で、人が選ぶものでは
+  // ないため (人が対立だと確信したなら zigzag = 矛盾を選ぶのが正しい)。
+  var EDIT_GLYPHS = [
+    ["arrow", "因果"], ["wave", "相関"], ["double", "補強"], ["zigzag", "矛盾"],
+    ["isa", "分類"], ["partof", "構成"], ["precedes", "時系列"], ["question", "疑問"]
+  ];
   var EDIT_OP_LABEL = {
     rename_node: "概念の改名", delete_node: "概念の削除", add_node: "概念の追加",
     relabel_edge: "関係のラベル変更", retype_edge: "関係の種類変更",
@@ -73,6 +92,7 @@
     session: null,
     view: null,
     detail: null,
+    layers: null,          // GET .../layers の結果 (R2a 以前は null のまま)
     summary: null,
     job: null,
     timer: null,
@@ -85,7 +105,7 @@
     attachments: [],       // このページセッションでアップロードした名前
     settings: {
       level: "standard", causalVerify: true, localOnly: false,
-      collapsed: false, learned: true
+      collapsed: false, learned: true, layers: true
     }
   };
 
@@ -405,7 +425,8 @@
         level: state.settings.level,
         local_only: state.settings.localOnly,
         causal_verify: state.settings.causalVerify,
-        learned: state.settings.learned !== false
+        learned: state.settings.learned !== false,
+        layers: state.settings.layers !== false
       });
       pollJob(res.job_id, message);
     } catch (err) {
@@ -516,6 +537,7 @@
     }
     state.session = session;
     state.summary = summary || null;
+    state.layers = null;
     state.verdicts = {};
     state.satisfaction = 0;
     state.tab = "map";
@@ -529,6 +551,7 @@
 
     try {
       state.detail = await api("/api/sessions/" + encodeURIComponent(session));
+      state.layers = await loadLayers(session);
       var level = state.settings.level;
       if (LEVELS.indexOf(level) < 0) level = state.detail.default_level;
       await loadMap(level, card);
@@ -537,6 +560,26 @@
       return;
     }
     refreshHistory();
+  }
+
+  // 多層分析のサイドカー (R2a 設計書 §10)。R2a 以前の地図は 404 が正常なので、
+  // **失敗を握りつぶして null にする** — 地図そのものは層が無くても開ける。
+  // null と「主張 0 件」は区別する (null なら機械タグの節を出さない)。
+  async function loadLayers(session) {
+    try {
+      return await api("/api/sessions/" + encodeURIComponent(session) + "/layers");
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // nanopub_id -> 主張。エッジの claim_refs から本文を引くための索引
+  function claimIndex() {
+    var index = {};
+    ((state.layers && state.layers.claims) || []).forEach(function (c) {
+      if (c.nanopub_id) index[c.nanopub_id] = c;
+    });
+    return index;
   }
 
   async function loadMap(level, card) {
@@ -594,6 +637,22 @@
           "矛盾を非断定化 " + (policy.contradiction_demoted || 0)));
       }
       card.appendChild(chips);
+    }
+
+    // --- 多層分析チップ (R2a 設計書 §10) ---
+    // 数は layers サイドカー (state.layers.stats) を一次情報にする。生成直後の
+    // summary にも同じ数があるが、履歴から開いた時は summary が無いため。
+    var lstats = (state.layers && state.layers.stats) || null;
+    if (lstats && lstats.claims) {
+      var rchips = el("div", "chip-line");
+      rchips.appendChild(el("span", "chip-sm", "主張 " + (lstats.claims || 0)
+        + " 件 (検証済 " + (lstats.validated || 0) + ")"));
+      if (lstats.rejected) {
+        rchips.appendChild(el("span", "chip-sm grey", "却下 " + lstats.rejected));
+      }
+      rchips.appendChild(el("span", "chip-sm" + (lstats.refutes ? "" : " grey"),
+        "矛盾 " + (lstats.refutes || 0) + " 件"));
+      card.appendChild(rchips);
     }
 
     // --- 学習チップ (§8.2)。何を機械が自動適用したかを必ず見せる ---
@@ -1247,6 +1306,7 @@
       pop.appendChild(el("p", "gap-src",
         "この線は " + edge.member_edge_ids.length + " 本の関係を束ねています"));
     }
+    layersSection(pop, edge);
 
     var actions = el("div", "gap-actions");
     actions.style.marginTop = "10px";
@@ -1278,8 +1338,75 @@
       { operation: "view_evidence", edge_id: edgeId }).catch(function () { });
   }
 
+  /* クリック展開の「機械が何を見てこの記号にしたか」(R2a 設計書 §10)。
+   *
+   * これが「UI は 8 種、内部 30 種を失わない」の実装。画面の記号は畳んだ
+   * 結果でしかないので、4 層 30 種のタグ・検証スコア・主張の本文をここで
+   * 開いて見せる。**ユーザーが編集した関係では機械の投影は走っていない**
+   * ので、その旨を明記する (機械の判断だと誤読させない)。 */
+  function layersSection(pop, edge) {
+    var tags = edge.layer_tags || {};
+    var refs = edge.claim_refs || [];
+    var validation = edge.validation || null;
+    var userEdited = typeof edge.origin === "string" && edge.origin.indexOf("user") === 0;
+    var hasTags = ["layer_A", "layer_B", "layer_C", "layer_D"].some(function (k) {
+      return (tags[k] || []).length;
+    });
+    if (!hasTags && !validation && !refs.length && !userEdited) return;
+
+    var box = el("div", "pop-form pop-sep");
+    box.appendChild(el("p", "pop-label", "機械タグ (内部 30 種)"));
+    if (hasTags) {
+      ["layer_A", "layer_B", "layer_C", "layer_D"].forEach(function (key) {
+        var values = tags[key] || [];
+        if (!values.length) return;
+        var line = el("div", "tag-line");
+        line.appendChild(el("span", "chip-sm grey", LAYER_LABEL[key] || key));
+        values.forEach(function (t) { line.appendChild(el("code", "tag", t)); });
+        box.appendChild(line);
+      });
+    } else {
+      box.appendChild(el("p", "gap-src",
+        userEdited ? "機械タグはありません (この関係はあなたが指定したものです)"
+          : "機械タグはありません (R2a 以前の生成、または多層分析を切った地図)"));
+    }
+
+    if (validation && validation.combined !== undefined && validation.combined !== null) {
+      var label = VALIDATION_LABEL[validation.status] || validation.status || "—";
+      var line2 = el("p", "gap-src",
+        "検証: combined " + validation.combined + " (" + label + ")");
+      if (validation.scores) {
+        line2.title = Object.keys(validation.scores).map(function (k) {
+          return k + "=" + validation.scores[k];
+        }).join(" / ");
+      }
+      box.appendChild(line2);
+      if (validation.requires_human_review) {
+        box.appendChild(el("p", "gap-src", "※ 裏付けが足りません。人の確認が要ります"));
+      }
+    }
+
+    var index = claimIndex();
+    refs.slice(0, 3).forEach(function (ref) {
+      var claim = index[ref];
+      if (!claim) return;
+      var text = (claim.assertion && claim.assertion.claim_text) || "";
+      var status = (claim.validation && claim.validation.status) || "";
+      var quote = el("div", "quote", "「" + text + "」");
+      quote.appendChild(el("div", "quote-src",
+        "主張 " + ref + (status ? " · " + (VALIDATION_LABEL[status] || status) : "")));
+      box.appendChild(quote);
+    });
+
+    if (userEdited) {
+      box.appendChild(el("p", "gap-src",
+        "表示はあなたの指定です (機械の投影は上書きしていません)"));
+    }
+    pop.appendChild(box);
+  }
+
   /* 根拠ポップオーバーに足す編集セクション (§8.2)。
-   * ラベル編集 / 種類 (因果⇄相関⇄対立) / 向き反転 / 削除。 */
+   * ラベル編集 / 種類 (8 記号) / 向き反転 / 削除。 */
   function edgeEditSection(edge, x, y) {
     var box = el("div", "pop-form pop-sep");
     box.appendChild(el("p", "pop-label", "関係のラベル"));
@@ -1409,6 +1536,19 @@
     bar.appendChild(fill);
     bar.title = "信頼度 " + gap.confidence;
     meta.appendChild(bar);
+    // 型バッジ (R2a 設計書 §9)。構造/言説/因果 = 何を見て見つけたか。
+    // Toulmin の grounds / warrant を title に入れて、判断材料をその場で読めるようにする
+    if (gap.gap_type) {
+      var kind = el("span", "chip-sm kind-" + gap.gap_type,
+        GAP_KIND_LABEL[gap.gap_type] || gap.gap_type);
+      var toulmin = gap.toulmin || {};
+      kind.title = [
+        gap.detection_signal ? "検出信号: " + gap.detection_signal : "",
+        toulmin.grounds ? "根拠: " + toulmin.grounds : "",
+        toulmin.warrant ? "判断規則: " + toulmin.warrant : ""
+      ].filter(Boolean).join("\n");
+      meta.appendChild(kind);
+    }
     meta.appendChild(el("span", "chip-sm grey",
       GAP_TYPE_LABEL[gap.presumed_type] || gap.presumed_type));
     (gap.evidence_links || []).slice(0, 2).forEach(function (link) {
@@ -1529,6 +1669,12 @@
       "causalVerify"));
     box.appendChild(checkboxField("Work IQ を使わない (ローカル資料のみ)",
       "localOnly"));
+    box.appendChild(checkboxField("多層分析を行う (既定 ON)", "layers"));
+    box.appendChild(el("p", "gap-src",
+      "文を「結果・手法・結論」などの語り口でラベル付けし、主張を取り出して"
+      + "別モデルで検証します。矢印 (因果) と ⚡ (矛盾) はこの検証を通った"
+      + "ものだけに点きます。切ると R1.5 と同じ、語彙証拠だけの地図になります "
+      + "(生成は少し速くなります)。"));
     box.appendChild(checkboxField("過去の修正から学習を適用 (既定 ON)", "learned"));
     box.appendChild(el("p", "gap-src",
       "「学習」はモデルの再学習ではありません。あなたが直した用語辞書・除外"

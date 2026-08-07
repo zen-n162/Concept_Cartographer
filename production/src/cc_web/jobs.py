@@ -147,6 +147,7 @@ class JobManager:
                 progress=progress,
                 offline=bool(p.get("offline")),
                 learned=bool(p.get("learned", True)),
+                layers=bool(p.get("layers", True)),
             )
             with self._lock:
                 job.summary = summary

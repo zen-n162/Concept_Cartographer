@@ -663,31 +663,55 @@ class FakeAnalysisAgent:
 
 
 class FakeVerificationAgent:
-    """cc-verification の代わり。R2a の 3 検証器 (§7) と描画検証を見分ける。
+    """cc-verification の代わり。**裁定 I の task 分岐をそのまま実装する**。
 
-    プロンプトの冒頭で用途を判別する — 1 体のエージェントに複数の役を
-    持たせている実装 (§7 の NLI と独立 LLM は同じ terra) の写しになっている。
+    1 体のエージェントに複数の役を持たせている実装 (§7 の NLI と独立 LLM は
+    同じ terra、描画検証も同じ terra) の写し。入力 JSON の `task` を見て
+    分岐し、`task` が無ければ描画検証として答える — agents_def の
+    VERIFICATION_INSTRUCTIONS に書いた契約と 1:1 で対応させてある。
+
+    `tasks` には受け取った task 名がそのまま並ぶので、テスト側から
+    「契約どおりの入力が届いたか」を検査できる。
     """
 
     def __init__(self, *, label: str = "entails", score: float = 0.9,
-                 supported: bool = True, confidence: float = 0.9) -> None:
+                 supported: bool = True, confidence: float = 0.9,
+                 causal: bool | None = True) -> None:
         self.label, self.score = label, score
         self.supported, self.confidence = supported, confidence
+        self.causal = causal
         self.kinds: list[str] = []
+        self.tasks: list[str] = []
+
+    def _task_of(self, prompt: str) -> str:
+        """プロンプト中の JSON から task を取り出す (無ければ描画検証)。"""
+        start = prompt.find("{")
+        if start < 0:
+            return ""
+        try:
+            payload = json.loads(prompt[start:])
+        except json.JSONDecodeError:
+            return ""
+        return str(payload.get("task") or "") if isinstance(payload, dict) else ""
 
     def __call__(self, prompt: str) -> str:
-        if prompt.startswith("前提と仮説の含意関係"):
+        task = self._task_of(prompt)
+        if task:
+            self.tasks.append(task)
+        if task == "nli":
             self.kinds.append("nli")
             return json.dumps({"label": self.label, "score": self.score,
                                "rationale": "前提に明示"}, ensure_ascii=False)
-        if prompt.startswith("次の主張が根拠テキストに支持されるか"):
+        if task == "claim_check":
             self.kinds.append("llm")
-            return json.dumps({"supported": self.supported, "why": "原文に明示",
-                               "confidence": self.confidence}, ensure_ascii=False)
-        if prompt.startswith("次の関係が"):
+            return json.dumps({"supported": self.supported, "score": self.confidence,
+                               "rationale": "原文に明示"}, ensure_ascii=False)
+        if task == "causal_check":
             self.kinds.append("causal")
-            return json.dumps({"causal": True, "why": "機序の記述あり"},
-                              ensure_ascii=False)
+            if self.causal is None:            # 契約違反 (causal キーを返さない)
+                return json.dumps({"why": "機序の記述あり"}, ensure_ascii=False)
+            return json.dumps({"causal": self.causal, "score": 0.9,
+                               "rationale": "機序の記述あり"}, ensure_ascii=False)
         self.kinds.append("scene")
         return json.dumps({"verdict": "PASS", "summary": "一致"},
                           ensure_ascii=False)
@@ -810,13 +834,15 @@ def test_progress_fires_for_zone_and_claims_even_when_skipped(tmp_path,
     monkeypatch.chdir(tmp_path)
     from cc_orchestrator.pipeline import run_pipeline
 
-    stages: list[str] = []
-    summary = run_pipeline("今週の研究を概念地図として整理して", target="file",
-                           kg_file=str(KG_FIXTURE), offline=True,
-                           verify_causal=False, export_svg=False,
-                           progress=lambda key, label: stages.append(key))
-    assert summary["layers"]["status"] == "disabled"
-    assert stages.index("zone") < stages.index("claims") < stages.index("relate")
+    for layers, expected in ((False, "disabled"), (True, "skipped_offline")):
+        stages: list[str] = []
+        summary = run_pipeline("今週の研究を概念地図として整理して", target="file",
+                               kg_file=str(KG_FIXTURE), offline=True,
+                               verify_causal=False, export_svg=False, layers=layers,
+                               progress=lambda key, label: stages.append(key))
+        assert summary["layers"]["status"] == expected
+        assert stages.index("zone") < stages.index("claims") < stages.index("relate")
+        assert stages.index("validate") < stages.index("rhetoric") < stages.index("detail")
 
 
 def test_offline_reuses_an_existing_sidecar(tmp_path, monkeypatch) -> None:
@@ -851,12 +877,16 @@ def test_offline_reuses_an_existing_sidecar(tmp_path, monkeypatch) -> None:
 
 
 def test_layers_off_is_byte_identical_to_r15(tmp_path, monkeypatch) -> None:
-    """既定 (layers=False) では層のファイルすら作らない — 挙動完全不変。"""
+    """`--no-layers` では層のファイルすら作らない — R1.5 と挙動完全不変。
+
+    M7 で既定は True になったが、**切ったときの逃げ道は R1.5 のまま**である
+    ことを固定する (フリップの巻き戻し手段として要る)。
+    """
     monkeypatch.chdir(tmp_path)
     from cc_orchestrator.pipeline import run_pipeline
 
     summary = run_pipeline("今週の研究を概念地図として整理して", target="file",
-                           kg_file=str(KG_FIXTURE), offline=True,
+                           kg_file=str(KG_FIXTURE), offline=True, layers=False,
                            verify_causal=False, export_svg=False)
     kg = json.loads((tmp_path / f"graphs/kg_session_{summary['session']}.json")
                     .read_text(encoding="utf-8"))

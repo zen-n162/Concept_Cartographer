@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from cc_core import editing
+from cc_core import editing, layers_store
 from cc_core.community import LEVEL_ORDER, expand_aggregate
 from cc_core.detail import project
 from cc_core.evaluation import summarize
@@ -58,6 +58,10 @@ class SessionNotFound(LookupError):
 
 class GapNotFound(LookupError):
     """未知の gap_id。"""
+
+
+class LayersNotFound(LookupError):
+    """layers サイドカーが無い (R2a 以前の生成、または多層分析を切った run)。"""
 
 
 def valid_session(session: str) -> bool:
@@ -166,6 +170,42 @@ def view_of(session: str, level: str) -> dict[str, Any]:
         "islands": [{"community_id": i.get("community_id"), "name": i.get("name")}
                     for i in view.get("islands", [])],
         "editable": editing.kg_file(session, graphs_dir=GRAPHS_DIR).exists(),
+    }
+
+
+# ------------------------------------------------------------ layers (R2a)
+
+
+# 主張 1 件のうち UI へ運ぶキー。サイドカーの zones は文が全部入って重いので
+# 返さない — クリック展開に要るのは「主張の本文と検証結果」だけ。
+CLAIM_FIELDS = ("nanopub_id", "assertion", "validation", "provenance")
+
+
+def layers_of(session: str) -> dict[str, Any]:
+    """layers サイドカーを UI 向けに返す (R2a 設計書 §10)。
+
+    エッジのクリック展開が `claim_refs` (nanopub_id) から主張の本文へ辿れる
+    ようにするのが主目的。**無い場合は例外**にして、呼び出し側が 404 と
+    「この地図は R2a 以前の生成です」を返す — 空の 200 を返すと、
+    「主張が 0 件だった地図」と「そもそも層を持たない地図」が区別できない。
+    """
+    if not valid_session(session):
+        raise LayersNotFound(f"不正なセッション ID: {session}")
+    if not layers_store.exists(session, graphs_dir=GRAPHS_DIR):
+        raise LayersNotFound(
+            "この地図は R2a 以前の生成です (多層分析の記録がありません)。"
+            "同じ資料でもう一度生成すると、主張と検証の記録が付きます。")
+    doc = layers_store.load(session, graphs_dir=GRAPHS_DIR)
+    claims = [{k: c[k] for k in CLAIM_FIELDS if k in c}
+              for c in doc.get("claims") or () if isinstance(c, dict)]
+    return {
+        "session": session,
+        "version": doc.get("version"),
+        "splitter": doc.get("splitter"),
+        "claims": claims,
+        "arguments": doc.get("arguments") or [],
+        "refutes": doc.get("refutes") or [],
+        "stats": doc.get("stats") or {},
     }
 
 
