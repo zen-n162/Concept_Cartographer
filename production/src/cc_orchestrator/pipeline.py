@@ -1028,16 +1028,20 @@ def run_pipeline(
         tag_note = (f"\n対象を次のタグに絞ってください: {', '.join(decision.tags)}"
                     if decision.tags else "")
 
-        prompt = (
-            f"依頼: {message}\n"
-            f"今日は {dt.datetime.now():%Y-%m-%d (%a)} です。対象期間: {window}。"
-            f"{lang_note}{tag_note}\n"
-        )
-        if local_only:
-            prompt += "\nWork IQ ツールは使わず、以下の添付資料のみから抽出してください。\n"
-        else:
-            prompt += ("\nWork IQ ツールで OneDrive / SharePoint から対象期間の研究資料を"
-                       "収集し、下の添付資料と併せて knowledge_graph を抽出してください。\n")
+        def _build_prompt(use_workiq: bool) -> str:
+            prompt = (
+                f"依頼: {message}\n"
+                f"今日は {dt.datetime.now():%Y-%m-%d (%a)} です。対象期間: {window}。"
+                f"{lang_note}{tag_note}\n"
+            )
+            if not use_workiq:
+                prompt += "\nWork IQ ツールは使わず、以下の添付資料のみから抽出してください。\n"
+            else:
+                prompt += ("\nWork IQ ツールで OneDrive / SharePoint から対象期間の研究資料を"
+                           "収集し、下の添付資料と併せて knowledge_graph を抽出してください。\n")
+            return prompt
+
+        prompt = _build_prompt(use_workiq=not local_only)
         prompt += (
             "\n重要: 各エッジには evidence_span を **配列** で付けてください。\n"
             '  "evidence_span": [{"document_id": "<ファイルID>", '
@@ -1059,9 +1063,41 @@ def run_pipeline(
         else:
             prompt += "\n(ローカル添付資料はありません)"
 
+        # プロンプト尾部 (evidence 指示・学習ヒント・添付) は上で prompt に付加済み。
+        # フォールバック用に「尾部だけ」を切り出しておく (先頭の依頼部と差し替えるため)
+        _tail = prompt[len(_build_prompt(use_workiq=not local_only)):]
+
         logger.info("extraction start local_docs=%d workiq=%s", len(docs), not local_only)
         _notify(progress, "extract")
-        kg = extract_json(client.run("cc-extraction", prompt))
+        try:
+            kg = extract_json(client.run("cc-extraction", prompt))
+        except RuntimeError as exc:
+            # Work IQ (Remote MCP) は Foundry 側 HttpClient の 100 秒制限で
+            # TaskCanceledException になる【実測 2026-08-07。foundry_v2.run が
+            # 3 回試して全滅した場合にここへ来る】。広い検索は毎回 100 秒を
+            # 超えることがあり、再試行では救えない。ローカル資料があるなら
+            # Work IQ 抜きで 1 回だけ作り直す (全滅よりは狭い地図を返す)。
+            msg = str(exc)
+            workiq_timeout = any(mark in msg for mark in (
+                "TaskCanceled", "HttpClient.Timeout",
+                "did not complete the request"))
+            if not workiq_timeout or local_only:
+                raise
+            if not docs:
+                raise RuntimeError(
+                    "Work IQ (M365 読み取り) が 100 秒制限に繰り返しかかり、"
+                    "応答を得られませんでした。時間を置いて再試行するか、"
+                    "資料を inbox/ に置いてローカルのみで再実行してください。"
+                    f" (詳細: {msg[:200]})") from exc
+            logger.warning("Work IQ timed out repeatedly; falling back to local-only")
+            _notify(progress, "extract")
+            kg = extract_json(client.run(
+                "cc-extraction", _build_prompt(use_workiq=False) + _tail))
+            summary["ingest"]["workiq"] = "timeout_fallback"
+            summary["ingest"]["note"] = (
+                "⚠ Work IQ (M365) が時間内に応答しなかったため、"
+                "ローカル資料のみで生成しました。M365 の資料を含めるには"
+                "時間を置いて再実行してください。")
         extractor_model = MODELS["extraction"]
         if kg.get("error") == "no_documents":
             summary["status"] = "no_documents"

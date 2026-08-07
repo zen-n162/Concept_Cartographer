@@ -931,6 +931,14 @@
     }
     card.appendChild(row);
 
+    // --- Work IQ タイムアウトのフォールバック警告 (黙ってローカル限定にしない) ---
+    var ing = summary.ingest || {};
+    if (ing.note) {
+      var iw = el("div", "chip-line");
+      iw.appendChild(el("span", "chip-sm warn", ing.note));
+      card.appendChild(iw);
+    }
+
     // --- ラベルの重なり警告 (レイアウト重なり設計書 裁定 AC) ---
     // 逃げ場が無くて重ねたときは黙らない。CLI 側 (_summary_body) と同じ情報。
     var ov = summary.overlaps;

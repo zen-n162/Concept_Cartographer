@@ -44,6 +44,10 @@ EXTRACTION_INSTRUCTIONS = """\
    研究関連ファイルを探して内容を読む。
    - `copilot_chat` (WorkIQCopilot): M365 全体の意味検索・内容要約に最も有効。
      「今週更新した研究関連ファイルの内容を要約して」のように依頼する。
+     **1 回の呼び出しには 100 秒の制限がある。** 広い問いを 1 回で投げず、
+     「期間 + 資料の種類」で絞った短い問いに分割すること。時間切れになったら
+     同じ問いを繰り返さず、findFileOrFolder → readSmallTextFile の
+     ファイル単位の読み取りに切り替えること。
    - `findFileOrFolderInMyDrive` / `getFolderChildrenInMyOnedrive` /
      `readSmallTextFileFromMyOnedrive` (OneDrive)
    - `findFileOrFolder` / `readSmallTextFile` / `findSite` (SharePoint)

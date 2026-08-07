@@ -595,3 +595,57 @@ def test_no_detail_note_when_the_budget_ran_out(online_run, monkeypatch) -> None
     assert levels["standard"]["nodes"] == levels["detailed"]["nodes"] == 12
     assert summary["extraction"]["stopped_by"] == "max_calls"
     assert "detail_note" not in summary
+
+
+# ================================ Work IQ 100 秒タイムアウトのフォールバック
+
+
+WORKIQ_TIMEOUT_MSG = (
+    'responses -> 400: {{ "error": {{ "message": "TaskCanceledException encountered '
+    "while invoking tool copilot_chat: The request was canceled due to the "
+    'configured HttpClient.Timeout of 100 seconds elapsing." }} }}')
+
+
+class TimeoutThenLocalFoundry(FakeFoundry):
+    """Work IQ 込みプロンプトはタイムアウト、ローカル限定なら台本どおり返す。"""
+
+    def run(self, agent, prompt, **kwargs):
+        if "Work IQ ツールで OneDrive" in prompt:
+            raise RuntimeError(WORKIQ_TIMEOUT_MSG)
+        return super().run(agent, prompt, **kwargs)
+
+
+def test_workiq_timeout_falls_back_to_local(online_run) -> None:
+    """Work IQ が 100 秒制限で全滅しても、ローカル資料があれば地図は出る。
+
+    実測 2026-08-07: 広い検索は再試行 3 回とも 100 秒を超え、run 全体が
+    失敗して赤いエラーカードになった。全滅よりも「ローカル資料だけの狭い
+    地図 + 明示の警告」を返す (黙ってローカル限定にしない)。
+    """
+    client = TimeoutThenLocalFoundry(chain_kg(12))
+    summary = online_run(client, local_only=False)
+
+    assert summary["ingest"]["workiq"] == "timeout_fallback"
+    assert "Work IQ" in summary["ingest"]["note"]
+    assert summary["knowledge_graph"]["nodes"] == 12
+
+
+def test_workiq_timeout_without_local_docs_raises_japanese(online_run) -> None:
+    """ローカル資料が無ければ、日本語の分かるエラーで止める。"""
+    client = TimeoutThenLocalFoundry(chain_kg(12))
+    with pytest.raises(RuntimeError) as ei:
+        online_run(client, docs=[], local_only=False)
+    assert "100 秒制限" in str(ei.value)
+    assert "inbox/" in str(ei.value)
+
+
+def test_non_transient_error_is_not_swallowed(online_run) -> None:
+    """タイムアウト以外の失敗 (認証切れ等) はフォールバックせず上げる。"""
+
+    class AuthErrorFoundry(FakeFoundry):
+        def run(self, agent, prompt, **kwargs):
+            raise RuntimeError("responses -> 401: unauthorized")
+
+    with pytest.raises(RuntimeError) as ei:
+        online_run(AuthErrorFoundry(chain_kg(5)), local_only=False)
+    assert "401" in str(ei.value)

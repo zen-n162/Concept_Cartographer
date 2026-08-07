@@ -198,8 +198,12 @@ def _summary_body(s: dict) -> None:
           f"{' / タグ=' + ','.join(r['tags']) if r.get('tags') else ''}")
     ing = s.get("ingest", {})
     if "window" in ing:
-        wq = "Work IQ 有効" if ing.get("workiq") == "enabled" else "ローカルのみ"
+        wq = ("Work IQ 有効" if ing.get("workiq") == "enabled"
+              else "Work IQ 応答なし→ローカルのみ" if ing.get("workiq") == "timeout_fallback"
+              else "ローカルのみ")
         print(f"📄 取込 ({ing.get('window')} / {wq})")
+        if ing.get("note"):
+            print(f"   {ing['note']}")
         if (ing.get("cache") or {}).get("hit"):
             print(f"   {ing['cache'].get('note')}")
         for f in ing.get("local_files", []):

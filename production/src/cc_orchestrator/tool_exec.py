@@ -155,10 +155,26 @@ class ToolExecutor:
 
     # -- export (パイプライン終端で直接呼ぶ; エージェント経由ではない) --
     def export_excalidraw(self, out_path: str) -> str | None:
-        """ローカルキャンバス (ミラー済み) から .excalidraw を書き出す。"""
+        """.excalidraw を書き出す。
+
+        target=file は **MCP を呼ばない** — file モードは「MCP なしで成立する」
+        のが設計契約 (計画 §3-2 の fallback 要件) で、ここだけライブゲートウェイに
+        依存すると、canvas 停止時に出力が欠け、テストも外部状態で揺れる
+        【実測 2026-08-07: 稼働中ゲートウェイの状態次第で asyncio が壊れた】。
+        描いた計画 (authoritative_plan / last_plan) から直接生成する。
+        """
         from pathlib import Path
 
         from cc_core.mcp_client import extract_json
+
+        if self.target == "file":
+            plan = self.authoritative_plan or self.last_plan
+            if plan is None:
+                logger.warning("export skipped: plan がありません (file mode)")
+                return None
+            from cc_core.excalidraw_file import write_scene
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            return str(write_scene(plan, out_path))
 
         async def _run() -> str:
             async with ExcalidrawClient(LOCAL_MCP) as client:
