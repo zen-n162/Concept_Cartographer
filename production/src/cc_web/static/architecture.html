@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept Cartographer — システム構成図</title>
+<link rel="icon" type="image/png" href="logo.png">
+<style>
+  :root {
+    --ink:#2C2C2A; --bg:#FDFDFC; --panel:#FAFAF8; --border:#E8E6E0;
+    --muted:#5F5E5A; --faint:#888780; --label:#444441;
+    --indigo-900:#26215C; --indigo-700:#3C3489; --indigo-500:#534AB7;
+    --indigo-300:#AFA9EC; --indigo-50:#EEEDFE;
+    --pink-500:#D4537E; --green-50:#E1F5EE; --green-700:#0F6E56;
+    --grad:linear-gradient(90deg,#534AB7,#D4537E);
+    --hairline:0.5px solid var(--border);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;
+    font-size:14.5px; line-height:1.8; }
+  .topbar { background:var(--indigo-900); height:6px; }
+  .wrap { max-width:1000px; margin:0 auto; padding:32px 24px 64px; }
+  header.hero { display:flex; align-items:center; gap:16px; margin-bottom:6px; }
+  header.hero img { width:56px; height:56px; object-fit:contain; }
+  h1 { margin:0; font-size:27px; font-weight:500;
+       background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .tagline { color:var(--muted); margin:0; }
+  h2 { font-size:19px; font-weight:500; color:var(--indigo-900);
+       margin:36px 0 10px; padding-top:10px; border-top:var(--hairline); }
+  .scroll { overflow-x:auto; border:var(--hairline); border-radius:12px; background:#fff; padding:14px; }
+  figure { margin:14px 0; }
+  figcaption { font-size:12.5px; color:var(--faint); margin-top:6px; }
+  table { border-collapse:collapse; width:100%; font-size:13.5px; }
+  th, td { text-align:left; padding:7px 12px; border-bottom:var(--hairline); vertical-align:top; }
+  th { color:var(--label); font-weight:600; white-space:nowrap; }
+  ul.plain { padding-left:20px; } ul.plain li { margin:5px 0; }
+  .note { border-left:3px solid var(--indigo-300); background:var(--indigo-50);
+          border-radius:0 10px 10px 0; padding:10px 14px; margin:12px 0; font-size:13.5px; }
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; font-size:12.5px;
+         background:var(--panel); border:var(--hairline); border-radius:6px; padding:1px 6px; }
+  footer { margin-top:44px; padding-top:14px; border-top:var(--hairline);
+           font-size:12.5px; color:var(--faint); }
+  .backlink { color:var(--indigo-500); text-decoration:none; }
+  .backlink:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="topbar"></div>
+<div class="wrap">
+
+<header class="hero">
+  <img src="logo.png" alt="Concept Cartographer のロゴ">
+  <div>
+    <h1>システム構成図</h1>
+    <p class="tagline">Concept Cartographer — どこで何が動き、何がこの Mac の外に出るのか</p>
+  </div>
+</header>
+
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 1000 790" role="img" aria-label="システム構成図: この Mac 内のフロント 2 面・オーケストレーション・決定的コア・保存・描画面と、Microsoft クラウド側の Foundry エージェント・Work IQ・M365 の関係" style="min-width:940px; display:block;">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#534AB7"/>
+    </marker>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#888780"/>
+    </marker>
+  </defs>
+
+  <!-- ユーザー -->
+  <g font-size="12" text-anchor="middle">
+    <rect x="150" y="14" width="180" height="40" rx="10" fill="#fff" stroke="#26215C"/>
+    <text x="240" y="38" fill="#26215C">🧑‍🔬 ブラウザ</text>
+    <rect x="380" y="14" width="180" height="40" rx="10" fill="#fff" stroke="#26215C"/>
+    <text x="470" y="38" fill="#26215C">⌨️ ターミナル</text>
+  </g>
+
+  <!-- この Mac 境界 -->
+  <rect x="16" y="78" width="650" height="600" rx="14" fill="none" stroke="#534AB7" stroke-dasharray="7 5" stroke-width="1.4"/>
+  <text x="32" y="102" font-size="13" fill="#3C3489" font-weight="600">この Mac (ローカル・127.0.0.1 のみ)</text>
+
+  <!-- フロント 2 面 -->
+  <g font-size="11.5" text-anchor="middle">
+    <rect x="40" y="116" width="270" height="52" rx="10" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="175" y="137" fill="#26215C">Web アプリ (FastAPI :8090 + 素の SPA)</text>
+    <text x="175" y="153" fill="#888780" font-size="10">進捗・地図・編集・評価・サインイン</text>
+    <rect x="350" y="116" width="220" height="52" rx="10" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="460" y="137" fill="#26215C">CLI (cc_orchestrator.chat)</text>
+    <text x="460" y="153" fill="#888780" font-size="10">同じ機能を薄いフラグで</text>
+  </g>
+
+  <!-- オーケストレーション -->
+  <rect x="40" y="196" width="530" height="56" rx="10" fill="#fff" stroke="#534AB7" stroke-width="1.3"/>
+  <text x="305" y="218" font-size="12" text-anchor="middle" fill="#26215C" font-weight="600">オーケストレーション pipeline.py</text>
+  <text x="305" y="236" font-size="10.5" text-anchor="middle" fill="#5F5E5A">⓪経路判定 → ①資料 → ②③文脈と主張 → ④関係 → ⑤検証 → ⑥論証 → ⑦記号投影 → ⑧描画 / QA 3 経路</text>
+
+  <!-- 決定的コア -->
+  <g font-size="10.5">
+    <rect x="40" y="280" width="300" height="168" rx="10" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="54" y="302" font-size="12" fill="#26215C" font-weight="600">決定的コア cc_core (LLM ゼロ)</text>
+    <text x="54" y="322" fill="#5F5E5A">・正規化と修復 / 4層30種 → 8記号の投影</text>
+    <text x="54" y="340" fill="#5F5E5A">・Leiden 詳細度 3 段 (切替 1ms) / ギャップ 3 型</text>
+    <text x="54" y="358" fill="#5F5E5A">・ラベル配置プランナー (重なりゼロ)</text>
+    <text x="54" y="376" fill="#5F5E5A">・編集 (原本不変+追記ログ) / 修正からの学習</text>
+    <text x="54" y="394" fill="#5F5E5A">・3 検証器の合成 / rejection_log</text>
+    <text x="54" y="412" fill="#5F5E5A">・オフライン評価 / Gap Report (閉世界)</text>
+    <text x="54" y="434" fill="#888780" font-size="9.5">同じ入力 → 必ず同じ出力 (テスト 700+ 件)</text>
+  </g>
+
+  <!-- cc_store -->
+  <g font-size="10.5" text-anchor="middle">
+    <rect x="368" y="280" width="200" height="70" rx="10" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="468" y="302" font-size="12" fill="#26215C" font-weight="600">cc_store 横断索引</text>
+    <text x="468" y="320" fill="#5F5E5A">SQLite + コーパスグラフ</text>
+    <text x="468" y="336" fill="#888780" font-size="9.5">派生キャッシュ (消えても自動再構築)</text>
+  </g>
+
+  <!-- 保存 -->
+  <g font-size="10.5" text-anchor="middle">
+    <rect x="368" y="370" width="200" height="78" rx="10" fill="#26215C"/>
+    <text x="468" y="392" font-size="12" fill="#EEEDFE" font-weight="600">ローカル保存</text>
+    <text x="468" y="410" fill="#CECBF6">graphs/ (原本 KG・計画・層・編集ログ)</text>
+    <text x="468" y="426" fill="#CECBF6">logs/ (評価・却下・学習・トークン)</text>
+    <text x="468" y="441" fill="#CECBF6">exports/ (.excalidraw / SVG)</text>
+  </g>
+
+  <!-- 描画面 -->
+  <g font-size="10.5">
+    <rect x="40" y="478" width="530" height="176" rx="10" fill="#fff" stroke="#E8E6E0"/>
+    <text x="54" y="500" font-size="12" fill="#26215C" font-weight="600">描画面</text>
+    <rect x="54" y="512" width="240" height="38" rx="8" fill="none" stroke="#534AB7" stroke-dasharray="5 4"/>
+    <text x="174" y="536" text-anchor="middle" fill="#3C3489">中間契約 layout_plan.json</text>
+    <text x="306" y="536" fill="#888780" font-size="9.5">← スキーマ+意味検証を通った計画だけが先へ</text>
+    <rect x="54" y="566" width="240" height="66" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="174" y="588" text-anchor="middle" fill="#26215C">Excalidraw MCP gateway :8000</text>
+    <text x="174" y="606" text-anchor="middle" fill="#26215C">→ ライブ canvas :3000</text>
+    <text x="174" y="622" text-anchor="middle" fill="#888780" font-size="9.5">描画後に要素を照合 (独立検証)</text>
+    <rect x="330" y="566" width="220" height="66" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="440" y="592" text-anchor="middle" fill="#26215C">ファイル直接生成</text>
+    <text x="440" y="610" text-anchor="middle" fill="#888780" font-size="9.5">.excalidraw / ヘッドレス SVG (MCP 不要)</text>
+  </g>
+
+  <!-- Microsoft クラウド境界 -->
+  <rect x="700" y="78" width="284" height="470" rx="14" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="1.2"/>
+  <text x="716" y="102" font-size="13" fill="#3C3489" font-weight="600">Microsoft クラウド</text>
+
+  <!-- Foundry -->
+  <g font-size="10.5">
+    <rect x="716" y="116" width="252" height="188" rx="10" fill="#fff" stroke="#534AB7"/>
+    <text x="730" y="138" font-size="12" fill="#26215C" font-weight="600">Microsoft Foundry</text>
+    <text x="730" y="154" fill="#888780" font-size="9.5">新 /agents + Responses API</text>
+    <text x="730" y="176" fill="#5F5E5A">・cc-extraction (sol) — 資料読取と抽出</text>
+    <text x="730" y="194" fill="#5F5E5A">・cc-analysis (sol) — 文脈/主張/論証/QA</text>
+    <text x="730" y="212" fill="#5F5E5A">・cc-verification (terra) — 独立検証</text>
+    <text x="730" y="230" fill="#5F5E5A">・cc-projection (luna) — 描画指揮</text>
+    <text x="730" y="252" fill="#888780" font-size="9.5">抽出と検証は別モデル (自己採点を回避)</text>
+    <text x="730" y="268" fill="#888780" font-size="9.5">呼び出し上限 knob + テストモードで再利用</text>
+    <text x="730" y="290" fill="#888780" font-size="9.5">認証: az CLI セッション (デバイスコード)</text>
+  </g>
+
+  <!-- Work IQ -->
+  <g font-size="10.5" text-anchor="middle">
+    <rect x="716" y="322" width="252" height="52" rx="10" fill="#fff" stroke="#AFA9EC"/>
+    <text x="842" y="344" fill="#26215C" font-weight="600">Work IQ Remote MCP</text>
+    <text x="842" y="362" fill="#888780" font-size="9.5">本人権限でファイルを読む (Foundry 側)</text>
+  </g>
+
+  <!-- M365 -->
+  <g font-size="10.5" text-anchor="middle">
+    <rect x="716" y="394" width="252" height="60" rx="10" fill="#fff" stroke="#E8E6E0"/>
+    <text x="842" y="418" fill="#26215C" font-weight="600">Microsoft 365</text>
+    <text x="842" y="436" fill="#5F5E5A">OneDrive / SharePoint / Teams</text>
+  </g>
+
+  <!-- 外部 API (オプトイン) -->
+  <g font-size="10" text-anchor="middle">
+    <rect x="716" y="480" width="252" height="46" rx="10" fill="none" stroke="#888780" stroke-dasharray="5 4"/>
+    <text x="842" y="500" fill="#5F5E5A">公開 API (arXiv 等) — 既定 OFF</text>
+    <text x="842" y="516" fill="#888780" font-size="9">明示オプトイン時のみ・送信は概念ラベルだけ・全件記録</text>
+  </g>
+
+  <!-- 矢印 -->
+  <g stroke="#534AB7" stroke-width="1.4" fill="none">
+    <line x1="240" y1="54" x2="200" y2="112" marker-end="url(#a1)"/>
+    <line x1="470" y1="54" x2="465" y2="112" marker-end="url(#a1)"/>
+    <line x1="175" y1="168" x2="230" y2="192" marker-end="url(#a1)"/>
+    <line x1="460" y1="168" x2="400" y2="192" marker-end="url(#a1)"/>
+    <line x1="180" y1="252" x2="180" y2="276" marker-end="url(#a1)"/>
+    <line x1="468" y1="252" x2="468" y2="276" marker-end="url(#a1)"/>
+    <line x1="468" y1="350" x2="468" y2="366" marker-end="url(#a1)"/>
+    <line x1="180" y1="448" x2="176" y2="508" marker-end="url(#a1)"/>
+    <line x1="174" y1="550" x2="174" y2="562" marker-end="url(#a1)"/>
+    <line x1="296" y1="533" x2="438" y2="562" marker-end="url(#a1)"/>
+  </g>
+  <!-- pipeline ⇄ Foundry -->
+  <g stroke="#534AB7" stroke-width="1.6" fill="none">
+    <line x1="572" y1="212" x2="712" y2="180" marker-end="url(#a1)"/>
+    <line x1="712" y1="200" x2="572" y2="230" marker-end="url(#a1)"/>
+  </g>
+  <text x="612" y="180" font-size="9.5" fill="#3C3489">プロンプト (資料抜粋・概念ラベル)</text>
+  <text x="628" y="248" font-size="9.5" fill="#3C3489">JSON 応答 (KG・判定・根拠引用)</text>
+  <!-- Foundry → WorkIQ → M365 -->
+  <g stroke="#888780" stroke-width="1.3" fill="none">
+    <line x1="842" y1="304" x2="842" y2="318" marker-end="url(#a2)"/>
+    <line x1="842" y1="374" x2="842" y2="390" marker-end="url(#a2)"/>
+  </g>
+  <text x="852" y="314" font-size="9.5" fill="#888780">読取 (本人権限)</text>
+
+  <!-- 凡例 -->
+  <g font-size="10.5">
+    <rect x="40" y="700" width="14" height="14" rx="4" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="62" y="712" fill="#5F5E5A">入口 / クラウド境界</text>
+    <rect x="200" y="700" width="14" height="14" rx="4" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="222" y="712" fill="#5F5E5A">決定的コード (LLM ゼロ)</text>
+    <rect x="392" y="700" width="14" height="14" rx="4" fill="#26215C"/>
+    <text x="414" y="712" fill="#5F5E5A">ローカル保存</text>
+    <rect x="520" y="700" width="14" height="14" rx="4" fill="none" stroke="#534AB7" stroke-dasharray="5 4"/>
+    <text x="542" y="712" fill="#5F5E5A">契約 / 境界 / オプトイン</text>
+    <text x="40" y="744" fill="#888780" font-size="10">Mac を出るのは「Foundry へのプロンプトと応答」だけ。M365 の本文は Foundry 側の Work IQ が本人権限で読み、こちらへは根拠の引用が返る。</text>
+    <text x="40" y="762" fill="#888780" font-size="10">地図・編集・評価・索引・学習はすべてローカル保存 (閉域前提: CDN・Web フォント・外部送信なし)。</text>
+  </g>
+</svg>
+</div>
+<figcaption>システム構成。紫破線 = この Mac の境界。LLM が要る仕事だけが右のクラウドへ渡り、構造化・描画・保存はすべて手元で完結する。</figcaption>
+</figure>
+
+<h2>境界の要点 (何が Mac の外に出るか)</h2>
+<ul class="plain">
+  <li><b>出るもの</b>: Foundry へのプロンプト (ローカル資料の抜粋・概念ラベル・検証の問い) と、その JSON 応答だけ</li>
+  <li><b>出ないもの</b>: 生成した地図・編集履歴・評価・索引・学習内容 — すべて <code>graphs/</code> と <code>logs/</code> にローカル保存</li>
+  <li><b>M365 の資料</b>: 本文は Foundry 側の Work IQ が<b>本人権限</b>で読む (あなたが読めるものだけ)。こちらへ返るのは概念と根拠の逐語引用</li>
+  <li><b>公開 API (arXiv 等)</b>: 既定 OFF。明示的に有効化したときだけ・送信は概念ラベルのみ・全件を記録</li>
+</ul>
+
+<h2>主要コンポーネント</h2>
+<div class="scroll">
+<table>
+  <tr><th>場所</th><th>コンポーネント</th><th>役割</th></tr>
+  <tr><td rowspan="6">この Mac</td><td>Web アプリ (cc_web)</td><td>FastAPI :8090 + 素の HTML/CSS/JS。CLI と同じパイプラインの薄いラッパ</td></tr>
+  <tr><td>CLI (cc_orchestrator.chat)</td><td>同機能をコマンドラインで。全機能は常に両面実装</td></tr>
+  <tr><td>pipeline.py</td><td>⓪〜⑧ の段取りと QA 3 経路。LLM 呼び出しはここが束ねる (上限 knob つき)</td></tr>
+  <tr><td>cc_core</td><td>決定的コア: 正規化・記号投影・詳細度・ギャップ・ラベル配置・編集・学習・検証合成・評価</td></tr>
+  <tr><td>cc_store</td><td>セッション横断の SQLite 索引 + コーパスグラフ (QA と Gap Report の材料。派生キャッシュ)</td></tr>
+  <tr><td>描画面</td><td>layout_plan.json 中間契約 → Excalidraw MCP gateway :8000 → canvas :3000 / またはファイル直接生成</td></tr>
+  <tr><td rowspan="3">クラウド</td><td>Microsoft Foundry</td><td>エージェント 4 体 (抽出 sol / 分析 sol / 検証 terra / 描画指揮 luna)。抽出と検証は別モデル</td></tr>
+  <tr><td>Work IQ Remote MCP</td><td>OneDrive / SharePoint / Teams を本人権限で読む (Foundry 側で動作)</td></tr>
+  <tr><td>Microsoft 365</td><td>研究資料の置き場所</td></tr>
+</table>
+</div>
+
+<div class="note">この構成の設計原則 — <b>LLM は判断が要るところだけ</b> (読む・抜く・検証する)。構造化・レイアウト・記号変換・再構成は決定的コードが担い、同じ入力からは必ず同じ地図が出ます。詳しい処理の流れは <a class="backlink" href="overview.html#how">説明ページの「しくみ」</a> へ。</div>
+
+<footer>
+  この構成図は <b>抽出 v2 + レスポンシブ (2026-08-07) 時点</b>の実装に基づきます。機能追加・仕様変更の際にこのページも更新されます。<br>
+  <a class="backlink" href="overview.html">← 説明ページ</a> ・ <a class="backlink" href="/">Web アプリへ</a>
+</footer>
+
+</div>
+</body>
+</html>
