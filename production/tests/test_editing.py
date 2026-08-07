@@ -33,7 +33,7 @@ from cc_core.editing import (
 from cc_core.evaluation import EvaluationStore, correction_rate
 
 PRODUCTION = Path(__file__).resolve().parents[1]
-KG_FIXTURE = PRODUCTION / "graphs" / "kg_session_20260807_010128.json"
+KG_FIXTURE = PRODUCTION / "tests" / "fixtures" / "kg_sample.json"
 SESSION = "20260807_120000"
 
 

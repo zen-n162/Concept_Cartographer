@@ -24,7 +24,7 @@ from cc_web import sessions as sessions_mod
 from cc_web.app import create_app
 
 PRODUCTION = Path(__file__).resolve().parents[1]
-KG_FIXTURE = PRODUCTION / "graphs" / "kg_session_20260807_010128.json"
+KG_FIXTURE = PRODUCTION / "tests" / "fixtures" / "kg_sample.json"
 KG_NAME = "kg_web_test.json"
 JOB_TIMEOUT_SEC = 60
 
