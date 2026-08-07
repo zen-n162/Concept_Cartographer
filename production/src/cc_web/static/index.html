@@ -131,13 +131,35 @@
       <path d="M7 11l5 5l5 -5M12 4v12"/>
     </symbol>
     <symbol id="i-loader-2" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>
+    <!-- 編集モード用 -->
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M4 7h16M10 11v6M14 11v6"/>
+      <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12M9 7v-3h6v3"/>
+    </symbol>
+    <symbol id="i-arrows-exchange" viewBox="0 0 24 24">
+      <path d="M7 10h14l-4 -4M17 14h-14l4 4"/>
+    </symbol>
+    <symbol id="i-arrow-back-up" viewBox="0 0 24 24">
+      <path d="M9 13l-4 -4l4 -4"/>
+      <path d="M5 9h11a4 4 0 0 1 0 8h-1"/>
+    </symbol>
+    <symbol id="i-link" viewBox="0 0 24 24">
+      <path d="M9 15l6 -6"/>
+      <path d="M11 6l.5 -.5a3.5 3.5 0 0 1 5 5l-.5 .5"/>
+      <path d="M13 18l-.5 .5a3.5 3.5 0 0 1 -5 -5l.5 -.5"/>
+    </symbol>
+    <symbol id="i-school" viewBox="0 0 24 24">
+      <path d="M12 4l10 5l-10 5l-10 -5z"/>
+      <path d="M7 11.5v5c0 1 2.2 2.5 5 2.5s5 -1.5 5 -2.5v-5"/>
+    </symbol>
   </defs>
 </svg>
 
 <!-- ================================ サイドバー ================================ -->
 <aside class="sidebar" id="sidebar">
   <div class="logo">
-    <img class="logo-mark" src="/static/logo.png" alt="Concept Cartographer のロゴ" width="34" height="34">
+    <img class="logo-mark" src="/static/logo.png" alt="Concept Cartographer のロゴ" width="42" height="42">
     <p class="logo-text">Concept<br>Cartographer</p>
   </div>
 
@@ -185,7 +207,10 @@
         </button>
         <p class="hdr-sub">自分専用の作業スペースで、個人の研究を整理・可視化します</p>
       </div>
-      <svg class="ic ic-14 hdr-info"><title>R1 は個人モードのみ</title><use href="#i-info-circle"/></svg>
+      <button class="hdr-info" id="btn-info-mode" type="button"
+              aria-label="モードの説明" title="モードの説明">
+        <svg class="ic ic-14"><use href="#i-info-circle"/></svg>
+      </button>
     </div>
 
     <div class="hdr-card level-card">
@@ -198,7 +223,10 @@
         </div>
         <p class="lv-counts" id="lv-counts"></p>
       </div>
-      <svg class="ic ic-14 hdr-info"><title>切替は再生成なし (LLM 呼び出しゼロ)</title><use href="#i-info-circle"/></svg>
+      <button class="hdr-info" id="btn-info-level" type="button"
+              aria-label="詳細度の説明" title="詳細度の説明">
+        <svg class="ic ic-14"><use href="#i-info-circle"/></svg>
+      </button>
     </div>
 
     <div class="hdr-card acct-card">
@@ -237,6 +265,8 @@
   </div>
 
   <footer class="composer">
+    <!-- このページで扱っている添付資料 (アップロード直後に見える手応えを出す) -->
+    <div class="attach-row" id="attach-row" hidden></div>
     <div class="composer-box">
       <textarea id="composer-input" rows="1"
                 placeholder="研究について何でも聞いてください..."></textarea>
@@ -284,6 +314,7 @@
 </div>
 
 <div class="popover" id="popover" hidden></div>
+<div class="popover info-pop" id="info-pop" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
 <script src="/static/app.js"></script>

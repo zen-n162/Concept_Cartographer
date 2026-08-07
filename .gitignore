@@ -28,6 +28,24 @@ build/
 # --- Node ---
 node_modules/
 
+# --- Agent 作業用ドキュメント (手元にだけ置く。CLAUDE.md が参照) ---
+production/docs/edit-feedback-design.md
+production/docs/excalidraw-export-design.md
+production/docs/webapp-design.md
+GITHUB_SETUP.md
+
+# --- セッション派生ファイル (テスト用の固定セッション以外) ---
+graphs/kg_session_*.json
+graphs/layout_plan_session_*.json
+graphs/edits_session_*.jsonl
+!graphs/kg_session_20260807_010128.json
+!graphs/layout_plan_session_20260807_010128.json
+exports/session_*.excalidraw
+exports/web/*.svg
+logs/evaluation.jsonl
+logs/web_history.jsonl
+logs/feedback/
+
 # --- nested repos / large binaries ---
 my-mcp-server/
 *.pdf

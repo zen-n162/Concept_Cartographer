@@ -20,6 +20,7 @@ import pytest
 
 from cc_core.evaluation import EvaluationStore
 from cc_web import account
+from cc_web import sessions as sessions_mod
 from cc_web.app import create_app
 
 PRODUCTION = Path(__file__).resolve().parents[1]
@@ -374,3 +375,108 @@ def test_job_error_is_reported(client, monkeypatch) -> None:
     assert job["status"] == "error"
     assert "extraction returned no nodes" in job["error"]
     assert client.get("/api/history").json()["items"][0]["status"] == "error"
+
+
+# ------------------------------------------------- ⑩ Excalidraw で開く (render)
+#
+# 実 MCP には依存しない (test_e2e_local.py が別途 @pytest.mark.e2e で持つ)。
+# ここでは cc_web.sessions.ToolExecutor を差し替えて経路だけを確認する。
+
+class _FakeRenderExecutor:
+    """ToolExecutor の代わり。成功応答を返すだけ (実 MCP なし)。"""
+
+    def __init__(self, target: str = "local") -> None:
+        assert target == "local"
+
+    def tool_render_layout_plan(self, args: dict) -> dict:
+        assert "islands" in args["plan"] and "nodes" in args["plan"]  # layout_plan が渡っている
+        return {"success": True, "created": ["isl-a", "node-1", "node-2"],
+                "errors": [], "element_map": {}, "rolled_back": False}
+
+
+class _FailingRenderExecutor:
+    """MCP/canvas が落ちている状況を模す。"""
+
+    def __init__(self, target: str = "local") -> None:
+        assert target == "local"
+
+    def tool_render_layout_plan(self, args: dict) -> dict:
+        raise ConnectionRefusedError("mock: connection refused")
+
+
+def test_render_returns_url_and_elements(client, session, monkeypatch) -> None:
+    monkeypatch.setattr(sessions_mod, "ToolExecutor", _FakeRenderExecutor)
+    res = client.post(f"/api/sessions/{session}/render?level=overview")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body == {"url": "http://127.0.0.1:3000", "elements": 3, "level": "overview"}
+
+
+def test_render_defaults_to_standard_level(client, session, monkeypatch) -> None:
+    seen = {}
+
+    class _Capturing(_FakeRenderExecutor):
+        def tool_render_layout_plan(self, args: dict) -> dict:
+            seen["level_nodes"] = len(args["plan"]["nodes"])
+            return super().tool_render_layout_plan(args)
+
+    monkeypatch.setattr(sessions_mod, "ToolExecutor", _Capturing)
+    res = client.post(f"/api/sessions/{session}/render")
+    assert res.status_code == 200
+    assert res.json()["level"] == "standard"
+    assert seen["level_nodes"] > 0
+
+
+def test_render_unknown_session_is_404(client) -> None:
+    assert client.post("/api/sessions/nope/render").status_code == 404
+
+
+def test_render_unknown_level_is_400(client, session) -> None:
+    res = client.post(f"/api/sessions/{session}/render?level=huge")
+    assert res.status_code == 400
+    assert "詳細度" in res.json()["error"]["message"]
+
+
+def test_render_connection_failure_is_503(client, session, monkeypatch) -> None:
+    monkeypatch.setattr(sessions_mod, "ToolExecutor", _FailingRenderExecutor)
+    res = client.post(f"/api/sessions/{session}/render?level=standard")
+    assert res.status_code == 503
+    msg = res.json()["error"]["message"]
+    assert "接続できません" in msg and "127.0.0.1:3000" in msg
+
+
+def test_render_failure_result_without_exception_is_also_503(client, session, monkeypatch) -> None:
+    """MCP には繋がるがツール呼び出し自体が失敗 (success=False) の場合も 503。"""
+
+    class _UnsuccessfulExecutor(_FakeRenderExecutor):
+        def tool_render_layout_plan(self, args: dict) -> dict:
+            return {"success": False, "errors": ["mock render error"], "created": []}
+
+    monkeypatch.setattr(sessions_mod, "ToolExecutor", _UnsuccessfulExecutor)
+    res = client.post(f"/api/sessions/{session}/render?level=standard")
+    assert res.status_code == 503
+
+
+def test_render_runs_on_job_worker_thread(client, session, monkeypatch) -> None:
+    """canvas は 1 面しかないため、生成ジョブ・編集と同じ JobManager の 1 本の
+    ワーカーで直列化される (run_exclusive 経由)。"""
+    seen: dict = {}
+
+    class _ThreadCapturing(_FakeRenderExecutor):
+        def tool_render_layout_plan(self, args: dict) -> dict:
+            seen["thread"] = threading.current_thread().name
+            return super().tool_render_layout_plan(args)
+
+    monkeypatch.setattr(sessions_mod, "ToolExecutor", _ThreadCapturing)
+    res = client.post(f"/api/sessions/{session}/render?level=standard")
+    assert res.status_code == 200
+    assert seen["thread"].startswith("cc-job"), (
+        "render が JobManager の専用ワーカー (cc-job) 以外で実行された: "
+        f"{seen['thread']}")
+
+
+def test_render_url_honors_env_override(client, session, monkeypatch) -> None:
+    monkeypatch.setenv("EXCALIDRAW_CANVAS_URL", "http://127.0.0.1:4000")
+    monkeypatch.setattr(sessions_mod, "ToolExecutor", _FakeRenderExecutor)
+    res = client.post(f"/api/sessions/{session}/render?level=standard")
+    assert res.json()["url"] == "http://127.0.0.1:4000"

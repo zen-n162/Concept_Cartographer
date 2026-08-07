@@ -29,6 +29,33 @@
   var GAP_TYPE_LABEL = {
     data: "データ不足", extraction: "抽出漏れ", true: "真の空白", unknown: "未分類"
   };
+  // 編集で選べる関係の種類 (設計書 §8.2「因果⇄相関⇄対立」)
+  var EDIT_GLYPHS = [["arrow", "因果"], ["wave", "相関"], ["tension", "対立候補"]];
+  var EDIT_OP_LABEL = {
+    rename_node: "概念の改名", delete_node: "概念の削除", add_node: "概念の追加",
+    relabel_edge: "関係のラベル変更", retype_edge: "関係の種類変更",
+    reverse_edge: "関係の向き反転", delete_edge: "関係の削除",
+    add_edge: "関係の追加", revert: "取り消し"
+  };
+  var LEARNED_KIND_LABEL = {
+    rename: "改名", stoplist: "除外", allow: "因果を許可",
+    deny: "因果を否定", reverse: "向きを修正"
+  };
+  var INFO_TEXT = {
+    mode: {
+      title: "モードについて",
+      body: "個人モード: あなたの OneDrive / SharePoint / ローカル資料だけを対象に、"
+        + "自分専用の概念地図を作ります。データは他のユーザーと共有されません。"
+        + "チームモード・機構横断モードは今後のリリース (R2 以降) で追加予定です。"
+    },
+    level: {
+      title: "詳細度について",
+      body: "概念地図の粒度です。Overview は 10〜20 / Standard は 20〜50 / "
+        + "Detailed は 50〜100 要素を目安に、重要度の高い概念から表示します "
+        + "(表示枠は概念+集約の合計)。切替は再生成なし・待ち時間ほぼゼロ。"
+        + "畳まれた「集約ノード」はクリックで中身を展開できます。"
+    }
+  };
   var POLL_MS = 1500;
 
   var state = {
@@ -43,7 +70,14 @@
     tab: "map",
     verdicts: {},
     satisfaction: 0,
-    settings: { level: "standard", causalVerify: true, localOnly: false, collapsed: false }
+    editMode: false,
+    pickFrom: null,        // 「関係を追加」の 1 個目に選んだノード id
+    files: [],             // inbox の一覧 (チップのメタ情報に使う)
+    attachments: [],       // このページセッションでアップロードした名前
+    settings: {
+      level: "standard", causalVerify: true, localOnly: false,
+      collapsed: false, learned: true
+    }
   };
 
   // -------------------------------------------------------------- 小道具
@@ -71,7 +105,9 @@
     try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
     if (!res.ok) {
       var msg = (data && data.error && data.error.message) || res.status + " " + res.statusText;
-      throw new Error(msg);
+      var err = new Error(msg);
+      err.status = res.status;   // 503 (canvas 未接続) を呼び出し側で区別するため
+      throw err;
     }
     return data;
   }
@@ -90,6 +126,24 @@
     node.hidden = false;
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { node.hidden = true; }, 3200);
+  }
+
+  /* ポップアップブロック時の案内 (設計書 §3-2)。URL はサーバの設定値
+   * (EXCALIDRAW_CANVAS_URL) であってユーザー入力ではないが、この
+   * ファイルの方針どおり innerHTML は使わず DOM 組み立てで入れる。 */
+  function toastLink(message, linkText, url) {
+    var node = $("#toast");
+    clear(node);
+    node.appendChild(document.createTextNode(message + " "));
+    var a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = linkText;
+    node.appendChild(a);
+    node.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { node.hidden = true; }, 8000);
   }
 
   function loadSettings() {
@@ -189,6 +243,8 @@
   }
 
   function renderFiles(files) {
+    state.files = files;
+    renderAttachments();
     var box = $("#file-list");
     clear(box);
     if (!files.length) {
@@ -207,6 +263,50 @@
       row.appendChild(meta);
       box.appendChild(row);
     });
+  }
+
+  // ------------------------------------------------------- 添付チップ
+  // アップロードした資料を入力欄の直上に出す。何を材料に地図を作るのかが
+  // 一目で分かり、× でその場から取り消せる (inbox/ から実削除)。
+  function renderAttachments() {
+    var row = $("#attach-row");
+    clear(row);
+    var names = state.attachments.filter(function (name) {
+      return state.files.some(function (f) { return f.name === name; });
+    });
+    state.attachments = names;
+    row.hidden = !names.length;
+    names.forEach(function (name) {
+      var meta = state.files.find(function (f) { return f.name === name; }) || {};
+      var info = extInfo(meta.ext || "");
+      var chip = el("div", "attach-chip");
+      chip.appendChild(icon(info.icon, "ic-14 " + info.cls));
+      var label = el("span", "attach-name", name);
+      label.title = name;
+      chip.appendChild(label);
+      if (meta.size !== undefined) {
+        chip.appendChild(el("span", "attach-size", fmtSize(meta.size)));
+      }
+      var close = el("button", "icon-btn");
+      close.type = "button";
+      close.title = name + " を削除";
+      close.appendChild(icon("x", "ic-12"));
+      close.addEventListener("click", function () { removeAttachment(name); });
+      chip.appendChild(close);
+      row.appendChild(chip);
+    });
+  }
+
+  async function removeAttachment(name) {
+    try {
+      await api("/api/files/" + encodeURIComponent(name), { method: "DELETE" });
+    } catch (err) {
+      toast("削除できませんでした: " + err.message);
+      return;
+    }
+    state.attachments = state.attachments.filter(function (n) { return n !== name; });
+    toast(name + " を削除しました");
+    refreshFiles();
   }
 
   async function refreshHistory() {
@@ -250,6 +350,8 @@
     state.session = null;
     state.view = null;
     state.summary = null;
+    state.editMode = false;
+    state.pickFrom = null;
     $("#home").hidden = false;
     $("#thread").hidden = true;
     clear($("#thread"));
@@ -293,7 +395,8 @@
         message: message,
         level: state.settings.level,
         local_only: state.settings.localOnly,
-        causal_verify: state.settings.causalVerify
+        causal_verify: state.settings.causalVerify,
+        learned: state.settings.learned !== false
       });
       pollJob(res.job_id, message);
     } catch (err) {
@@ -407,6 +510,8 @@
     state.verdicts = {};
     state.satisfaction = 0;
     state.tab = "map";
+    state.editMode = false;
+    state.pickFrom = null;
 
     var card = el("div", "card");
     card.id = "result-card";
@@ -482,6 +587,19 @@
       card.appendChild(chips);
     }
 
+    // --- 学習チップ (§8.2)。何を機械が自動適用したかを必ず見せる ---
+    var learned = summary.learned;
+    if (learned && learned.enabled && learnedCount(learned)) {
+      var lchips = el("div", "chip-line");
+      var lbtn = el("button", "chip-sm learn", " " + learnedSummaryText(learned));
+      lbtn.type = "button";
+      lbtn.title = "適用した内訳を表示";
+      lbtn.insertBefore(icon("school", "ic-12"), lbtn.firstChild);
+      lbtn.addEventListener("click", function () { openLearnedDetails(learned); });
+      lchips.appendChild(lbtn);
+      card.appendChild(lchips);
+    }
+
     // --- タブ ---
     var gaps = view.gaps || [];
     var tabs = el("div", "tabs");
@@ -511,10 +629,149 @@
     return span;
   }
 
+  function learnedCount(report) {
+    return (report.renames || 0) + (report.stoplisted || 0)
+      + (report.causal_allow || 0) + (report.causal_deny || 0);
+  }
+
+  function learnedSummaryText(report) {
+    var parts = [];
+    if (report.renames) parts.push("改名 " + report.renames);
+    if (report.stoplisted) parts.push("除外 " + report.stoplisted);
+    var causal = (report.causal_allow || 0) + (report.causal_deny || 0);
+    if (causal) parts.push("因果上書き " + causal);
+    if (report.reversed) parts.push("向き修正 " + report.reversed);
+    return "学習を適用: " + parts.join("・");
+  }
+
+  function openLearnedDetails(report) {
+    var box = el("div");
+    box.appendChild(el("p", null,
+      "過去にあなたが直した内容を、今回の生成へ自動で適用した一覧です。"));
+    (report.details || []).forEach(function (d) {
+      var row = el("div", "learn-row");
+      row.appendChild(el("span", "chip-sm grey learn-kind",
+        LEARNED_KIND_LABEL[d.kind] || d.kind));
+      var text = d.kind === "rename" ? "「" + d.from + "」→「" + d.to + "」"
+        : d.kind === "stoplist" ? "「" + d.label + "」を除外"
+          : "「" + d.from + "」→「" + d.to + "」";
+      row.appendChild(el("span", null, text));
+      box.appendChild(row);
+    });
+    if (!(report.details || []).length) {
+      box.appendChild(el("p", "gap-src", "適用された項目はありません"));
+    }
+    box.appendChild(el("p", "gap-src",
+      "「学習」はモデルの再学習ではありません。用語辞書・除外リスト・因果の"
+      + "上書きを決定的に当てているだけで、設定の「過去の修正から学習を適用」"
+      + "を切れば止まります。"));
+    openModal("学習の適用内訳", box);
+  }
+
+  // ---------------------------------------------------------- 編集モード
+  function clearPick() {
+    state.pickFrom = null;
+    var picked = document.querySelectorAll(".cc-node.is-pick");
+    for (var i = 0; i < picked.length; i++) picked[i].classList.remove("is-pick");
+  }
+
+  function setEditMode(on) {
+    state.editMode = !!on;
+    clearPick();
+    hidePopover();
+    renderResult($("#result-card"));
+    toast(state.editMode
+      ? "編集モード: ノード/関係をクリックして修正します"
+      : "編集モードを終了しました");
+  }
+
+  function learnedDeltaText(delta) {
+    if (!delta || !delta.changed) return "";
+    var names = {
+      lexicon: "用語辞書", lexicon_auto: "自動改名", stoplist: "除外候補",
+      stoplist_auto: "自動除外", causal_overrides: "因果上書き", few_shot: "事例"
+    };
+    var keys = Object.keys(delta.changed);
+    if (!keys.length) return "";
+    return "学習 " + keys.map(function (k) {
+      var v = delta.changed[k];
+      return (names[k] || k) + (v > 0 ? "+" + v : String(v));
+    }).join("・");
+  }
+
+  /* 編集を 1 件送る。成功したら地図を取り直して即時反映する
+   * (詳細度切替と同じ経路なので体感は同じ速さ)。*/
+  async function postEdit(op, okMessage) {
+    if (!state.session) return null;
+    var level = (state.view && state.view.level) || state.settings.level;
+    var url = "/api/sessions/" + encodeURIComponent(state.session)
+      + "/edits?level=" + encodeURIComponent(level);
+    var res;
+    try {
+      res = await postJSON(url, op);
+    } catch (err) {
+      toast("編集できませんでした: " + err.message);
+      return null;
+    }
+    hidePopover();
+    closeModal();
+    clearPick();
+    try {
+      state.detail = await api("/api/sessions/" + encodeURIComponent(state.session));
+    } catch (e) { /* KPI が取れなくても地図は出す */ }
+    try {
+      await loadMap(level);
+    } catch (err) {
+      toast("地図の再取得に失敗しました: " + err.message);
+    }
+    var extra = learnedDeltaText(res.learned_delta);
+    toast((okMessage || "編集を反映しました") + (extra ? " / " + extra : ""));
+    (res.warnings || []).forEach(function (w) { console.warn("edit warning: " + w); });
+    return res;
+  }
+
+  function editToolbar(bar) {
+    var toggle = el("button", "btn-sm" + (state.editMode ? " is-on" : ""), " 編集");
+    toggle.type = "button";
+    toggle.insertBefore(icon("edit", "ic-12"), toggle.firstChild);
+    toggle.addEventListener("click", function () { setEditMode(!state.editMode); });
+    bar.appendChild(toggle);
+
+    var history = el("button", "btn-sm", " 編集履歴");
+    history.type = "button";
+    history.insertBefore(icon("history", "ic-12"), history.firstChild);
+    history.addEventListener("click", openEditHistory);
+    bar.appendChild(history);
+
+    if (!state.editMode) return;
+    var addNode = el("button", "btn-sm", " 概念を追加");
+    addNode.type = "button";
+    addNode.insertBefore(icon("plus", "ic-12"), addNode.firstChild);
+    addNode.addEventListener("click", openAddNodeDialog);
+    bar.appendChild(addNode);
+
+    var addEdge = el("button", "btn-sm" + (state.pickFrom ? " is-on" : ""), " 関係を追加");
+    addEdge.type = "button";
+    addEdge.insertBefore(icon("link", "ic-12"), addEdge.firstChild);
+    addEdge.addEventListener("click", function () {
+      if (state.pickFrom) { clearPick(); renderResult($("#result-card")); return; }
+      state.pickFrom = "await";      // 次のノードクリックを始点にする
+      renderResult($("#result-card"));
+      toast("始点にする概念をクリックしてください");
+    });
+    bar.appendChild(addEdge);
+  }
+
   function renderMapTab(body) {
     var bar = el("div", "map-toolbar");
     bar.appendChild(el("span", "chip-sm", LEVEL_LABEL[state.view.level]));
-    var hint = el("span", "gap-src", "ノード/関係をクリックすると詳細を表示します");
+    if (state.view.editable !== false) editToolbar(bar);
+    var hint = el("span", "gap-src", state.editMode
+      ? (state.pickFrom === "await" ? "始点の概念をクリック"
+        : state.pickFrom ? "終点の概念をクリック (もう一度ボタンで取消)"
+          : "ノード/関係をクリックして修正します")
+      : "ノード/関係をクリックすると詳細を表示します");
+    if (state.editMode) hint.className = "edit-hint";
     bar.appendChild(hint);
     var links = el("div", "grow");
     links.style.display = "flex";
@@ -529,14 +786,70 @@
     sceneLink.href = base + "/excalidraw";
     sceneLink.insertBefore(icon("download", "ic-12"), sceneLink.firstChild);
     links.appendChild(sceneLink);
+    links.appendChild(excalidrawOpenButton());
     bar.appendChild(links);
     body.appendChild(bar);
 
-    var wrap = el("div", "map-wrap");
+    var wrap = el("div", "map-wrap" + (state.editMode ? " is-editing" : ""));
     // サーバが生成した SVG のみ innerHTML で展開する (ユーザー入力は入らない)
     wrap.innerHTML = state.svg;
     wrap.addEventListener("click", onMapClick);
     body.appendChild(wrap);
+    if (state.pickFrom && state.pickFrom !== "await") markPick(wrap, state.pickFrom);
+  }
+
+  var EXCALIDRAW_BTN_LABEL = " Excalidraw で開く";
+
+  /* 地図ツールバーの「Excalidraw で開く」(設計書 §3)。今見ている詳細度を
+   * ローカル canvas へ描画してから新しいタブで開く。canvas は 1 面しか
+   * ないため置き換わることを title で明記する。 */
+  function excalidrawOpenButton() {
+    var btn = el("button", "linkbtn", EXCALIDRAW_BTN_LABEL);
+    btn.type = "button";
+    btn.title = "現在のキャンバスを置き換えます";
+    btn.insertBefore(icon("edit", "ic-12"), btn.firstChild);
+    btn.addEventListener("click", function () { openInExcalidraw(btn); });
+    return btn;
+  }
+
+  async function openInExcalidraw(btn) {
+    var level = state.view.level;
+    btn.disabled = true;
+    clear(btn);
+    btn.appendChild(icon("loader-2", "ic-12 spin"));
+    btn.appendChild(document.createTextNode(" 描画中…"));
+    try {
+      var res = await postJSON("/api/sessions/" + encodeURIComponent(state.session)
+        + "/render?level=" + encodeURIComponent(level), {});
+      var win = window.open(res.url, "_blank", "noopener");
+      if (!win) {
+        toastLink("ブラウザがタブを塞ぎました。", "ここをクリック", res.url);
+      } else {
+        toast(LEVEL_LABEL[level] + " を Excalidraw で開きました (" + res.elements + " 要素)");
+      }
+    } catch (err) {
+      if (err.status === 503) {
+        toast("ローカルの Excalidraw に接続できませんでした。"
+          + ".excalidraw をダウンロードして開いてください");
+      } else {
+        toast("描画できませんでした: " + err.message);
+      }
+    } finally {
+      btn.disabled = false;
+      clear(btn);
+      btn.appendChild(icon("edit", "ic-12"));
+      btn.appendChild(document.createTextNode(EXCALIDRAW_BTN_LABEL));
+    }
+  }
+
+  function markPick(wrap, nodeId) {
+    var groups = wrap.querySelectorAll('[data-node-id="' + cssEscape(nodeId) + '"]');
+    for (var i = 0; i < groups.length; i++) groups[i].classList.add("is-pick");
+  }
+
+  // querySelector に入れる id を安全にする (id は英数字前提だが念のため)
+  function cssEscape(value) {
+    return String(value).replace(/["\\]/g, "\\$&");
   }
 
   // ---------------------------------------------------------- 地図クリック
@@ -544,11 +857,18 @@
     var target = event.target;
     var node = target.closest ? target.closest(".cc-node") : null;
     if (node) {
-      if (node.getAttribute("data-kind") === "aggregate") {
-        expandAggregate(node.getAttribute("data-aggregate-id")
-          || node.getAttribute("data-node-id"));
+      var nodeId = node.getAttribute("data-node-id");
+      var isAggregate = node.getAttribute("data-kind") === "aggregate";
+      if (state.editMode && state.pickFrom && !isAggregate) {
+        pickForEdge(nodeId);
+        return;
+      }
+      if (isAggregate) {
+        expandAggregate(node.getAttribute("data-aggregate-id") || nodeId);
+      } else if (state.editMode) {
+        showNodePopover(nodeId, event.clientX, event.clientY);
       } else {
-        showNodeInfo(node.getAttribute("data-node-id"));
+        showNodeInfo(nodeId);
       }
       return;
     }
@@ -558,6 +878,276 @@
       return;
     }
     hidePopover();
+  }
+
+  /* 「関係を追加」の 2 クリック。1 個目は選択スタイル、2 個目でダイアログ。 */
+  function pickForEdge(nodeId) {
+    if (state.pickFrom === "await") {
+      state.pickFrom = nodeId;
+      renderResult($("#result-card"));
+      toast("終点にする概念をクリックしてください");
+      return;
+    }
+    if (state.pickFrom === nodeId) {
+      toast("同じ概念どうしは繋げません");
+      return;
+    }
+    openAddEdgeDialog(state.pickFrom, nodeId);
+  }
+
+  function nodeById(nodeId) {
+    return (state.view.nodes || []).find(function (n) { return n.id === nodeId; });
+  }
+
+  function originBadge(element) {
+    if (!element || !element.origin) return null;
+    return el("span", "badge-user",
+      element.origin === "user_added" ? "あなたが追加" : "あなたが編集");
+  }
+
+  function placePopover(pop, x, y) {
+    pop.hidden = false;
+    var rect = pop.getBoundingClientRect();
+    var left = Math.min(x + 12, window.innerWidth - rect.width - 12);
+    var top = Math.min(y + 12, window.innerHeight - rect.height - 12);
+    pop.style.left = Math.max(12, left) + "px";
+    pop.style.top = Math.max(12, top) + "px";
+  }
+
+  /* 編集モードのノードポップオーバー: ラベル編集 / 削除 / ここから関係 */
+  function showNodePopover(nodeId, x, y) {
+    var node = nodeById(nodeId);
+    if (!node) return;
+    var pop = $("#popover");
+    clear(pop);
+
+    var head = el("div", "pop-head");
+    head.appendChild(el("span", "chip-sm", "概念"));
+    head.appendChild(el("span", null, node.label));
+    var badge = originBadge(node);
+    if (badge) head.appendChild(badge);
+    var close = el("button", "icon-btn");
+    close.type = "button";
+    close.appendChild(icon("x", "ic-14"));
+    close.addEventListener("click", hidePopover);
+    head.appendChild(close);
+    pop.appendChild(head);
+
+    var form = el("div", "pop-form");
+    form.appendChild(el("p", "pop-label", "ラベル"));
+    var input = document.createElement("input");
+    input.type = "text";
+    input.value = node.label;
+    form.appendChild(input);
+
+    var row = el("div", "pop-row");
+    var save = el("button", "btn-sm is-on", "保存");
+    save.type = "button";
+    save.addEventListener("click", function () {
+      var label = input.value.trim();
+      if (!label || label === node.label) { hidePopover(); return; }
+      postEdit({ op: "rename_node", target: nodeId, payload: { label: label } },
+        "概念を改名しました");
+    });
+    row.appendChild(save);
+
+    var link = el("button", "btn-sm", " ここから関係");
+    link.type = "button";
+    link.insertBefore(icon("link", "ic-12"), link.firstChild);
+    link.addEventListener("click", function () {
+      hidePopover();
+      state.pickFrom = nodeId;
+      renderResult($("#result-card"));
+      toast("終点にする概念をクリックしてください");
+    });
+    row.appendChild(link);
+
+    var del = el("button", "btn-sm danger", " 削除");
+    del.type = "button";
+    del.insertBefore(icon("trash", "ic-12"), del.firstChild);
+    del.addEventListener("click", function () {
+      if (!window.confirm("「" + node.label + "」と、その関係をすべて削除します。"
+        + "\n(編集履歴から取り消せます)")) return;
+      postEdit({ op: "delete_node", target: nodeId }, "概念を削除しました");
+    });
+    row.appendChild(del);
+    form.appendChild(row);
+    pop.appendChild(form);
+    placePopover(pop, x, y);
+  }
+
+  /* ノード/関係の編集ダイアログ (ツールバーから) */
+  function openAddNodeDialog() {
+    var box = el("div");
+    box.appendChild(el("p", "pop-label", "概念のラベル"));
+    var input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "例: 線量評価プロトコル";
+    box.appendChild(input);
+
+    box.appendChild(el("p", "pop-label", "所属する島"));
+    var select = document.createElement("select");
+    (state.view.islands || []).forEach(function (isl) {
+      var opt = document.createElement("option");
+      opt.value = isl.community_id;
+      opt.textContent = isl.name || isl.community_id;
+      select.appendChild(opt);
+    });
+    var newOpt = document.createElement("option");
+    newOpt.value = "__new__";
+    newOpt.textContent = "＋ 新しい島をつくる";
+    select.appendChild(newOpt);
+    box.appendChild(select);
+
+    var add = el("button", "btn-primary", "追加する");
+    add.type = "button";
+    add.style.marginTop = "14px";
+    add.addEventListener("click", function () {
+      var label = input.value.trim();
+      if (!label) { toast("ラベルを入力してください"); return; }
+      var payload = select.value === "__new__"
+        ? { label: label, new_island: true }
+        : { label: label, community_id: select.value };
+      postEdit({ op: "add_node", payload: payload }, "概念を追加しました");
+    });
+    box.appendChild(add);
+    box.appendChild(el("p", "gap-src",
+      "追加した概念には根拠スパンがありません (手動追加として記録されます)。"));
+    openModal("概念を追加", box);
+    setTimeout(function () { input.focus(); }, 0);
+  }
+
+  function openAddEdgeDialog(fromId, toId) {
+    var from = nodeById(fromId), to = nodeById(toId);
+    if (!from || !to) { clearPick(); return; }
+    var box = el("div");
+    box.appendChild(el("p", null, "「" + from.label + "」 → 「" + to.label + "」"));
+
+    box.appendChild(el("p", "pop-label", "関係のラベル"));
+    var input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "例: 影響する";
+    box.appendChild(input);
+
+    box.appendChild(el("p", "pop-label", "関係の種類"));
+    var select = document.createElement("select");
+    EDIT_GLYPHS.forEach(function (pair) {
+      var opt = document.createElement("option");
+      opt.value = pair[0];
+      opt.textContent = pair[1];
+      if (pair[0] === "wave") opt.selected = true;   // 既定は相関 (安全側)
+      select.appendChild(opt);
+    });
+    box.appendChild(select);
+
+    var add = el("button", "btn-primary", "関係を追加");
+    add.type = "button";
+    add.style.marginTop = "14px";
+    add.addEventListener("click", function () {
+      postEdit({
+        op: "add_edge",
+        payload: {
+          from: fromId, to: toId,
+          label: input.value.trim(), glyph: select.value
+        }
+      }, "関係を追加しました");
+    });
+    box.appendChild(add);
+    box.appendChild(el("p", "gap-src",
+      "手動で追加した関係は根拠なしとして扱われ、因果精度の集計からは"
+      + "除外されます (AI の性能を測る指標のため)。"));
+    openModal("関係を追加", box);
+    setTimeout(function () { input.focus(); }, 0);
+  }
+
+  // ---------------------------------------------------------- 編集履歴
+  async function openEditHistory() {
+    var data;
+    try {
+      data = await api("/api/sessions/" + encodeURIComponent(state.session) + "/edits");
+    } catch (err) {
+      toast("編集履歴を取得できませんでした: " + err.message);
+      return;
+    }
+    var box = el("div");
+    (data.warnings || []).forEach(function (w) {
+      box.appendChild(el("p", "gap-src", "⚠ " + w));
+    });
+    var edits = data.edits || [];
+    if (!edits.length) {
+      box.appendChild(el("p", "gap-src", "まだ編集はありません"));
+    }
+    edits.slice().reverse().forEach(function (edit) {
+      box.appendChild(editRow(edit));
+    });
+    box.appendChild(el("p", "gap-src",
+      "取り消しても履歴は消えません (取り消し行を追記する方式です)。"
+      + "元の抽出結果は常に保持されています。"));
+    openModal("編集履歴", box);
+  }
+
+  function editRow(edit) {
+    var row = el("div", "edit-row"
+      + (edit.reverted ? " is-reverted" : "")
+      + (edit.op === "revert" ? " is-revert" : ""));
+    var main = el("div", "edit-main");
+    main.appendChild(el("p", "edit-op", editDescription(edit)));
+    main.appendChild(el("p", "edit-meta",
+      edit.edit_id + " · " + (edit.ts || "").replace("T", " ")
+      + " · " + (edit.user || "")));
+    row.appendChild(main);
+    if (edit.op !== "revert" && !edit.reverted) {
+      var btn = el("button", "btn-sm", " 取り消す");
+      btn.type = "button";
+      btn.insertBefore(icon("arrow-back-up", "ic-12"), btn.firstChild);
+      btn.addEventListener("click", function () { revertEdit(edit.edit_id); });
+      row.appendChild(btn);
+    }
+    return row;
+  }
+
+  function editDescription(edit) {
+    var name = EDIT_OP_LABEL[edit.op] || edit.op;
+    var payload = edit.payload || {};
+    var before = edit.before || {};
+    if (edit.op === "rename_node") {
+      return name + ": 「" + (before.label || edit.target) + "」→「" + payload.label + "」";
+    }
+    if (edit.op === "delete_node") {
+      return name + ": 「" + ((before.node || {}).label || edit.target) + "」";
+    }
+    if (edit.op === "add_node") return name + ": 「" + payload.label + "」";
+    if (edit.op === "add_edge") {
+      return name + ": 「" + (before.from_label || payload.from) + "」→「"
+        + (before.to_label || payload.to) + "」";
+    }
+    if (edit.op === "revert") return name + ": " + edit.target;
+    var pair = "「" + (before.from_label || "?") + "」→「" + (before.to_label || "?") + "」";
+    if (edit.op === "retype_edge") {
+      var label = (EDIT_GLYPHS.find(function (g) { return g[0] === payload.glyph; })
+        || [payload.glyph, payload.glyph])[1];
+      return name + ": " + pair + " を " + label + " へ";
+    }
+    if (edit.op === "relabel_edge") return name + ": " + pair + " 「" + payload.label + "」";
+    return name + ": " + pair;
+  }
+
+  async function revertEdit(editId) {
+    var level = (state.view && state.view.level) || state.settings.level;
+    try {
+      await postJSON("/api/sessions/" + encodeURIComponent(state.session)
+        + "/edits/" + encodeURIComponent(editId) + "/revert?level="
+        + encodeURIComponent(level), {});
+    } catch (err) {
+      toast("取り消せませんでした: " + err.message);
+      return;
+    }
+    closeModal();
+    try {
+      state.detail = await api("/api/sessions/" + encodeURIComponent(state.session));
+      await loadMap(level);
+    } catch (e) { /* 地図が取れなくても取り消し自体は成立している */ }
+    toast(editId + " を取り消しました");
   }
 
   function showNodeInfo(nodeId) {
@@ -621,6 +1211,8 @@
     var info = GLYPH_INFO[edge.glyph] || { label: edge.glyph, cls: "tension" };
     head.appendChild(el("span", "glyph " + info.cls, info.label));
     head.appendChild(el("span", null, edge.label || ""));
+    var badge = originBadge(edge);
+    if (badge) head.appendChild(badge);
     var close = el("button", "icon-btn");
     close.type = "button";
     close.appendChild(icon("x", "ic-14"));
@@ -635,7 +1227,9 @@
       pop.appendChild(quote);
     });
     if (!spans.length) {
-      pop.appendChild(el("p", "gap-src", "根拠スパンがありません (evidence 表示率の対象外)"));
+      pop.appendChild(el("p", "gap-src", edge.origin === "user_added"
+        ? "手動追加 (根拠なし)"
+        : "根拠スパンがありません (evidence 表示率の対象外)"));
     }
     if (edge.causal_check && edge.causal_check.reason) {
       pop.appendChild(el("p", "gap-src", "判定: " + edge.causal_check.reason));
@@ -667,18 +1261,109 @@
       });
     pop.appendChild(actions);
 
-    pop.hidden = false;
-    var rect = pop.getBoundingClientRect();
-    var left = Math.min(x + 12, window.innerWidth - rect.width - 12);
-    var top = Math.min(y + 12, window.innerHeight - rect.height - 12);
-    pop.style.left = Math.max(12, left) + "px";
-    pop.style.top = Math.max(12, top) + "px";
+    if (state.editMode) pop.appendChild(edgeEditSection(edge, x, y));
+
+    placePopover(pop, x, y);
 
     postJSON("/api/sessions/" + encodeURIComponent(state.session) + "/evaluation",
       { operation: "view_evidence", edge_id: edgeId }).catch(function () { });
   }
 
+  /* 根拠ポップオーバーに足す編集セクション (§8.2)。
+   * ラベル編集 / 種類 (因果⇄相関⇄対立) / 向き反転 / 削除。 */
+  function edgeEditSection(edge, x, y) {
+    var box = el("div", "pop-form pop-sep");
+    box.appendChild(el("p", "pop-label", "関係のラベル"));
+    var input = document.createElement("input");
+    input.type = "text";
+    input.value = edge.label || "";
+    box.appendChild(input);
+
+    var row1 = el("div", "pop-row");
+    var save = el("button", "btn-sm is-on", "ラベルを保存");
+    save.type = "button";
+    save.addEventListener("click", function () {
+      postEdit({ op: "relabel_edge", target: edge.id,
+        payload: { label: input.value.trim() } }, "ラベルを変更しました");
+    });
+    row1.appendChild(save);
+    box.appendChild(row1);
+
+    box.appendChild(el("p", "pop-label", "種類"));
+    var row2 = el("div", "pop-row");
+    EDIT_GLYPHS.forEach(function (pair) {
+      var btn = el("button", "btn-sm" + (edge.glyph === pair[0] ? " is-on" : ""), pair[1]);
+      btn.type = "button";
+      btn.disabled = edge.glyph === pair[0];
+      btn.addEventListener("click", function () {
+        postEdit({ op: "retype_edge", target: edge.id, payload: { glyph: pair[0] } },
+          pair[1] + " に変更しました");
+      });
+      row2.appendChild(btn);
+    });
+    box.appendChild(row2);
+
+    var row3 = el("div", "pop-row");
+    var rev = el("button", "btn-sm", " 向きを反転");
+    rev.type = "button";
+    rev.insertBefore(icon("arrows-exchange", "ic-12"), rev.firstChild);
+    rev.addEventListener("click", function () {
+      postEdit({ op: "reverse_edge", target: edge.id }, "向きを反転しました");
+    });
+    row3.appendChild(rev);
+
+    var del = el("button", "btn-sm danger", " 削除");
+    del.type = "button";
+    del.insertBefore(icon("trash", "ic-12"), del.firstChild);
+    del.addEventListener("click", function () {
+      postEdit({ op: "delete_edge", target: edge.id }, "関係を削除しました");
+    });
+    row3.appendChild(del);
+    box.appendChild(row3);
+
+    if (edge.glyph !== "arrow") {
+      box.appendChild(el("p", "gap-src",
+        "因果にすると 3 点セットの検証は通しません (人間の判断が優先されます)。"));
+    }
+    return box;
+  }
+
   function hidePopover() { $("#popover").hidden = true; }
+
+  // ---------------------------------------------------------- 説明パネル
+  function showInfoPopover(key, anchor) {
+    var pop = $("#info-pop");
+    var text = INFO_TEXT[key];
+    if (!text) return;
+    if (!pop.hidden && pop.dataset.key === key) { hideInfoPopover(); return; }
+    clear(pop);
+    pop.dataset.key = key;
+    var head = el("div", "pop-head");
+    head.appendChild(icon("info-circle", "ic-14"));
+    head.appendChild(el("span", null, text.title));
+    var close = el("button", "icon-btn");
+    close.type = "button";
+    close.appendChild(icon("x", "ic-14"));
+    close.addEventListener("click", hideInfoPopover);
+    head.appendChild(close);
+    pop.appendChild(head);
+    pop.appendChild(el("p", null, text.body));
+    var rect = anchor.getBoundingClientRect();
+    pop.hidden = false;
+    var width = pop.getBoundingClientRect().width;
+    pop.style.left = Math.max(12,
+      Math.min(rect.left - width + rect.width, window.innerWidth - width - 12)) + "px";
+    pop.style.top = (rect.bottom + 8) + "px";
+    anchor.classList.add("is-on");
+  }
+
+  function hideInfoPopover() {
+    var pop = $("#info-pop");
+    pop.hidden = true;
+    pop.dataset.key = "";
+    var buttons = document.querySelectorAll(".hdr-info.is-on");
+    for (var i = 0; i < buttons.length; i++) buttons[i].classList.remove("is-on");
+  }
 
   // ---------------------------------------------------------- ギャップ
   function renderGapsTab(body) {
@@ -835,9 +1520,72 @@
       "causalVerify"));
     box.appendChild(checkboxField("Work IQ を使わない (ローカル資料のみ)",
       "localOnly"));
+    box.appendChild(checkboxField("過去の修正から学習を適用 (既定 ON)", "learned"));
+    box.appendChild(el("p", "gap-src",
+      "「学習」はモデルの再学習ではありません。あなたが直した用語辞書・除外"
+      + "リスト・因果の上書きを決定的に当て、抽出プロンプトへ注意書きを添える"
+      + "だけです。適用した内容は毎回、結果カードのチップに出ます。"));
+    var show = el("button", "btn-sm", "学習している内容を見る");
+    show.type = "button";
+    show.addEventListener("click", openLearnedStore);
+    box.appendChild(show);
     box.appendChild(el("p", "gap-src",
       "設定はこのブラウザに保存され、次のジョブ送信時に反映されます。"));
     openModal("設定", box);
+  }
+
+  /* 学習ストアの中身 (GET /api/learned)。「黙って直さない」の担保として、
+   * 何が自動適用の対象になっているかをいつでも確認できるようにする。 */
+  async function openLearnedStore() {
+    var data;
+    try {
+      data = await api("/api/learned");
+    } catch (err) {
+      toast("学習内容を取得できませんでした: " + err.message);
+      return;
+    }
+    var box = el("div");
+    var s = data.summary || {};
+    var chips = el("div", "chip-line");
+    chips.appendChild(el("span", "chip-sm", "用語辞書 " + s.lexicon
+      + " (自動 " + s.lexicon_auto + ")"));
+    chips.appendChild(el("span", "chip-sm", "除外 " + s.stoplist
+      + " (自動 " + s.stoplist_auto + ")"));
+    chips.appendChild(el("span", "chip-sm grey", "因果上書き " + s.causal_overrides));
+    chips.appendChild(el("span", "chip-sm grey", "事例 " + s.few_shot));
+    box.appendChild(chips);
+
+    (data.lexicon || []).forEach(function (e) {
+      var row = el("div", "learn-row");
+      row.appendChild(el("span", "chip-sm" + (e.auto ? "" : " grey") + " learn-kind",
+        e.auto ? "自動改名" : "ヒントのみ"));
+      row.appendChild(el("span", null, "「" + e.from + "」→「" + e.to + "」 ×" + e.n));
+      box.appendChild(row);
+    });
+    (data.stoplist || []).forEach(function (e) {
+      var row = el("div", "learn-row");
+      row.appendChild(el("span", "chip-sm" + (e.auto ? "" : " grey") + " learn-kind",
+        e.auto ? "自動除外" : "ヒントのみ"));
+      row.appendChild(el("span", null, "「" + e.label + "」 ×" + e.n));
+      box.appendChild(row);
+    });
+    (data.causal_overrides || []).forEach(function (o) {
+      var row = el("div", "learn-row");
+      row.appendChild(el("span", "chip-sm grey learn-kind",
+        LEARNED_KIND_LABEL[o.decision] || o.decision));
+      row.appendChild(el("span", null,
+        "「" + o.from_label + "」→「" + o.to_label + "」"));
+      box.appendChild(row);
+    });
+    (data.warnings || []).forEach(function (w) {
+      box.appendChild(el("p", "gap-src", "⚠ " + w));
+    });
+    if (!s.lexicon && !s.stoplist && !s.causal_overrides) {
+      box.appendChild(el("p", "gap-src",
+        "まだ学習した内容はありません。地図を編集すると、その差分がここに"
+        + "溜まっていきます。"));
+    }
+    openModal("学習している内容", box);
   }
 
   function checkboxField(label, key) {
@@ -868,6 +1616,12 @@
       "関係の線をクリックすると根拠の引用が出ます。正しい / 誤り / 判断不能で評価できます。",
       "ギャップタブでは候補を [有用] [却下] で確定します。確定は取り消せません (監査のため)。",
       "資料は inbox/ に置くかサイドバーからアップロードしてください (pdf / docx / txt / md)。"
+      + " アップロードした資料は入力欄の上にチップで出ます (× で削除)。",
+      "地図ツールバーの [編集] で編集モードに入ると、概念の改名・削除・追加、関係の"
+      + "ラベル/種類/向きの変更・削除・追加ができます。元の抽出結果は書き換えず、"
+      + "編集は追記ログとして残るので [編集履歴] からいつでも取り消せます。",
+      "編集内容は用語辞書・除外リスト・因果の上書きとして次回以降の生成に反映されます"
+      + " (設定の「過去の修正から学習を適用」で ON/OFF)。"
     ].forEach(function (text) { list.appendChild(el("li", null, text)); });
     box.appendChild(list);
     openModal("使い方", box);
@@ -925,7 +1679,20 @@
       if (event.target === $("#overlay")) closeModal();
     });
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") { closeModal(); hidePopover(); hideModeMenu(); }
+      if (event.key === "Escape") {
+        closeModal(); hidePopover(); hideModeMenu(); hideInfoPopover();
+        if (state.pickFrom) { clearPick(); renderResult($("#result-card")); }
+      }
+    });
+
+    // ヘッダーの ℹ︎ (モード / 詳細度)
+    $("#btn-info-mode").addEventListener("click", function (event) {
+      event.stopPropagation();
+      showInfoPopover("mode", event.currentTarget);
+    });
+    $("#btn-info-level").addEventListener("click", function (event) {
+      event.stopPropagation();
+      showInfoPopover("level", event.currentTarget);
     });
 
     // ファイルアップロード
@@ -943,7 +1710,10 @@
       }
       try {
         var res = await api("/api/files", { method: "POST", body: form });
-        toast((res.saved || []).length + " 件をアップロードしました");
+        (res.saved || []).forEach(function (name) {
+          if (state.attachments.indexOf(name) < 0) state.attachments.push(name);
+        });
+        toast((res.saved || []).length + " 件アップロードしました");
         refreshFiles();
       } catch (err) {
         toast("アップロードに失敗しました: " + err.message);
@@ -982,6 +1752,8 @@
         && !event.target.closest("#btn-mode")) hideModeMenu();
       if (!$("#popover").hidden && !event.target.closest("#popover")
         && !event.target.closest(".map-wrap")) hidePopover();
+      if (!$("#info-pop").hidden && !event.target.closest("#info-pop")
+        && !event.target.closest(".hdr-info")) hideInfoPopover();
     });
 
     // サイドバーの折りたたみ

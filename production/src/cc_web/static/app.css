@@ -39,8 +39,15 @@ body {
   background:var(--bg);
   -webkit-font-smoothing:antialiased;
 }
-body.sidebar-hidden { grid-template-columns:0 minmax(0,1fr); }
+/* 閉じたときは **1 カラム**にする。`0 minmax(0,1fr)` のままだと、.sidebar が
+   display:none になって in-flow のグリッド項目が main だけになったとき、
+   自動配置で main が第 1 カラム (幅 0) に入り、minmax(0,1fr) の第 2 カラムは
+   空のまま残る。結果、全コンテンツが min-content 幅へ潰れて日本語が
+   1 文字ずつ縦に折り返る (再現済み)。 */
+body.sidebar-hidden { grid-template-columns:minmax(0,1fr); }
 body.sidebar-hidden .sidebar { display:none; }
+/* 再展開ボタンは position:fixed (left:8px) なのでヘッダーに重なる。逃がす */
+body.sidebar-hidden .hdr { padding-left:48px; }
 
 p { margin:0; }
 button { font:inherit; color:inherit; background:none; border:none; padding:0;
@@ -68,11 +75,11 @@ button:disabled { cursor:default; }
   font-size:12.5px;
   overflow-y:auto;
 }
-.logo { display:flex; align-items:center; gap:9px; margin:0 2px 16px; }
+.logo { display:flex; align-items:center; gap:12px; margin:0 2px 16px; }
 .logo-mark {
   /* 透過 PNG のブランドマーク (コンパス+概念グラフ)。サイドバーの
      明るい地にそのまま載せる — 箱で囲うとコンパスの尖りが窮屈になる */
-  width:34px; height:34px; object-fit:contain; flex:0 0 auto;
+  width:42px; height:42px; object-fit:contain; flex:0 0 auto;
 }
 .logo-text { font-size:13.5px; font-weight:500; line-height:1.25; color:var(--indigo-900); }
 
@@ -147,7 +154,13 @@ button:disabled { cursor:default; }
               align-items:center; gap:4px; }
 .hdr-label { font-size:10.5px; color:var(--indigo-300); letter-spacing:.03em;
              margin-bottom:4px; }
-.hdr-info { color:var(--indigo-300); margin-left:auto; flex:0 0 auto; }
+/* ℹ︎ は説明ポップオーバーを開くボタン (ホバーの title だけでは読めないため) */
+.hdr-info {
+  color:var(--indigo-300); margin-left:auto; flex:0 0 auto;
+  display:flex; align-items:center; justify-content:center;
+  width:22px; height:22px; border-radius:8px; align-self:flex-start;
+}
+.hdr-info:hover, .hdr-info.is-on { color:var(--indigo-50); background:rgba(255,255,255,.12); }
 
 .seg { display:flex; background:rgba(11,11,11,.25); border-radius:8px; padding:2px; gap:2px; }
 .seg-btn { font-size:11.5px; padding:3px 10px; border-radius:6px; color:var(--indigo-200); }
@@ -366,6 +379,77 @@ button:disabled { cursor:default; }
   background:var(--indigo-900); color:var(--indigo-50); font-size:12px;
   border-radius:10px; padding:9px 15px; box-shadow:0 8px 22px rgba(38,33,92,.28);
 }
+.toast a { color:inherit; text-decoration:underline; }
+
+/* ------------------------------------------------- 添付ファイルのチップ */
+/* 入力欄の直上。アップロードした資料が「見えている」こと自体が、
+   何を材料に地図が作られるかの説明になる。 */
+.attach-row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+.attach-chip {
+  display:inline-flex; align-items:center; gap:7px;
+  border:var(--hairline); border-radius:8px; background:#fff;
+  padding:5px 5px 5px 9px; font-size:11.5px; color:var(--muted); max-width:240px;
+}
+.attach-chip .attach-name {
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;
+}
+.attach-chip .attach-size { color:var(--faint); font-size:10.5px; flex:0 0 auto; }
+.attach-chip .icon-btn { width:19px; height:19px; color:var(--faint); flex:0 0 auto; }
+.attach-chip .icon-btn:hover { color:var(--pink-700); background:var(--pink-50); }
+
+/* ------------------------------------------------- 説明ポップオーバー */
+.info-pop { width:320px; }
+.info-pop .pop-head { font-weight:500; margin-bottom:6px; }
+.info-pop p { font-size:12.5px; line-height:1.75; color:var(--muted); }
+
+/* ------------------------------------------------------------ 編集モード */
+.map-wrap.is-editing { box-shadow:inset 0 0 0 2px var(--indigo-200); }
+.map-wrap.is-editing .cc-node ellipse { cursor:pointer; }
+.map-wrap .cc-node.is-pick ellipse { stroke:var(--pink-500); stroke-width:3.4; }
+/* ユーザーが触った要素は地図上でも見分けられるようにする (data-origin) */
+.map-wrap .cc-node[data-origin="user"] ellipse { stroke:var(--indigo-500); stroke-width:2.6; }
+.map-wrap .cc-edge[data-origin="user"] line { stroke-width:3.4; }
+
+.edit-hint { font-size:11px; color:var(--indigo-700); background:var(--indigo-50);
+             border-radius:8px; padding:3px 9px; }
+
+.pop-form { display:flex; flex-direction:column; gap:8px; margin-top:9px; }
+.pop-form input[type=text], .pop-form select, .modal-body input[type=text],
+.modal-body select {
+  font:inherit; font-size:12.5px; width:100%; background:#fff; color:var(--ink);
+  border:0.5px solid var(--input-border); border-radius:8px; padding:6px 9px;
+}
+.pop-form input[type=text]:focus, .pop-form select:focus,
+.modal-body input[type=text]:focus, .modal-body select:focus {
+  outline:none; border-color:var(--indigo-300);
+}
+.pop-row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.pop-sep { border-top:var(--hairline); margin-top:10px; padding-top:9px; }
+.pop-label { font-size:10.5px; color:var(--faint); letter-spacing:.03em; }
+.badge-user {
+  font-size:10.5px; border-radius:8px; padding:2px 8px;
+  background:var(--indigo-50); color:var(--indigo-700); font-weight:500;
+}
+.btn-sm.danger { color:var(--pink-700); }
+.btn-sm.danger:hover:not(:disabled) { border-color:#E9C4BE; background:var(--pink-50); }
+
+/* 編集履歴 */
+.edit-row { display:flex; gap:10px; align-items:flex-start; padding:9px 0;
+            border-bottom:var(--hairline); }
+.edit-row:last-child { border-bottom:none; }
+.edit-main { flex:1; min-width:0; }
+.edit-op { font-size:12px; line-height:1.5; word-break:break-word; }
+.edit-meta { font-size:10.5px; color:var(--faint); margin-top:3px; }
+.edit-row.is-reverted .edit-op { text-decoration:line-through; color:var(--placeholder); }
+.edit-row.is-revert .edit-op { color:var(--faint); }
+
+/* 学習チップ (結果カード) */
+.chip-sm.learn { background:var(--green-50); color:var(--green-700); }
+.chip-sm.learn:hover { background:var(--green-300); }
+.learn-row { display:flex; gap:8px; align-items:flex-start; padding:6px 0;
+             border-bottom:var(--hairline); font-size:12px; }
+.learn-row:last-child { border-bottom:none; }
+.learn-kind { flex:0 0 auto; }
 
 @media (max-width:1080px) {
   .tpl-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }

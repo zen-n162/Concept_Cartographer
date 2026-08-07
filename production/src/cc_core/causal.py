@@ -199,13 +199,38 @@ def apply_relation_policy(
     """
     out = {**kg, "edges": []}
     stats = {"causal_kept": 0, "causal_demoted": 0,
-             "contradiction_demoted": 0, "unchanged": 0}
+             "contradiction_demoted": 0, "unchanged": 0,
+             "override_allow": 0, "override_deny": 0}
 
     for edge in kg.get("edges", []):
         e = dict(edge)
         glyph = e.get("glyph", "arrow")
+        override = e.get("causal_override")
 
-        if glyph == "arrow":
+        if glyph == "arrow" and override in ("allow", "deny"):
+            # 過去の修正による確定 (編集/学習設計書 §5.3 の 3)。
+            # ユーザーが一度判断した対に、毎回 LLM 検証をかけ直さない
+            # (検証コストの削減 + 人間が最終権威)。
+            hits = find_causal_cues(_edge_text(e))
+            if override == "allow":
+                e["causal_check"] = {
+                    "lexicon_hit": hits, "verifier_verdict": "skipped",
+                    "reason": "過去の修正で因果と確定 (ユーザー) — 独立検証をスキップ",
+                }
+                stats["causal_kept"] += 1
+                stats["override_allow"] += 1
+            else:
+                e["glyph"] = "wave"
+                e["label"] = _demote_label(e.get("label", ""), "user_override")
+                e["causal_check"] = {
+                    "lexicon_hit": hits, "verifier_verdict": "skipped",
+                    "demoted_from": "arrow",
+                    "reason": "過去の修正で因果を否定 (ユーザー) — 独立検証をスキップ",
+                }
+                stats["causal_demoted"] += 1
+                stats["override_deny"] += 1
+
+        elif glyph == "arrow":
             check = validate_causal_edge(
                 e, verifier=verifier, require_verifier=require_verifier)
             e["causal_check"] = check.to_dict()

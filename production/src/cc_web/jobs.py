@@ -99,6 +99,19 @@ class JobManager:
                     bool(params.get("offline")), params.get("target"))
         return job
 
+    def run_exclusive(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        """生成ジョブと**同じ 1 本のワーカー**で即時実行し、結果を待つ。
+
+        編集も rebuild (plan の書き換え) を伴うため、生成中に割り込むと
+        同じ plan ファイルを 2 系統が書いて壊れる。JobManager の
+        ThreadPoolExecutor(max_workers=1) を共有することで、キューに並べる
+        だけで直列化できる (編集/学習設計書 §8.1)。
+
+        呼び出し元は FastAPI の同期エンドポイント (= 別スレッド) なので、
+        ここで結果を待ってもイベントループは止まらない。
+        """
+        return self._pool.submit(fn, *args, **kwargs).result()
+
     def get(self, job_id: str) -> Job | None:
         with self._lock:
             return self._jobs.get(job_id)
@@ -133,6 +146,7 @@ class JobManager:
                 verify_causal=bool(p.get("causal_verify", True)),
                 progress=progress,
                 offline=bool(p.get("offline")),
+                learned=bool(p.get("learned", True)),
             )
             with self._lock:
                 job.summary = summary

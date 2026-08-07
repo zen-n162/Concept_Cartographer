@@ -21,12 +21,14 @@ from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from cc_core.community import LEVEL_ORDER
+from cc_core.editing import EditConflict, EditError, EditTargetNotFound
 from cc_core.evaluation import EvaluationSession, EvaluationStore
 from cc_core.gaps import GapDecisionError
+from cc_core.learning import cue_warnings, load_learned, summarize as summarize_learned
 from cc_core.logging_util import get_logger
 from cc_web import account, jobs as jobs_mod, sessions as sessions_mod
 from cc_web.jobs import JobManager
@@ -79,10 +81,23 @@ class JobRequest(BaseModel):
     kg_file: str | None = None
     target: str = "local"
     offline: bool = False
+    learned: bool = True     # 過去の修正からの学習を適用するか (§8.1)
 
 
 class GapDecisionRequest(BaseModel):
     decision: str
+
+
+class EditRequest(BaseModel):
+    """編集 1 操作 (編集/学習設計書 §2)。
+
+    edit_id / ts / user / before はサーバが充填するので受け取らない
+    (クライアントに採番させると重複や偽装の余地ができる)。
+    """
+
+    op: str
+    target: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 # ------------------------------------------------------------ ヘルパ
@@ -124,6 +139,15 @@ def _session_or_404(session: str) -> None:
         sessions_mod.plan_path(session)
     except sessions_mod.SessionNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _edit_http_error(exc: EditError) -> HTTPException:
+    """編集エラーを HTTP へ写す (§8.1: validate 400 / 対象なし 404 / 競合 409)。"""
+    if isinstance(exc, EditTargetNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, EditConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
 
 
 # ------------------------------------------------------------ アプリ生成
@@ -202,6 +226,26 @@ def create_app() -> FastAPI:
         logger.info("upload saved n=%d", len(saved))
         return {"saved": saved}
 
+    @app.delete("/api/files/{name}")
+    def api_delete_file(name: str) -> dict[str, Any]:
+        """添付チップの × から inbox/ の資料を実削除する。
+
+        アップロードと同じ basename 検証を通す (パス要素を含む名前で
+        inbox の外を消せないようにする)。
+        """
+        safe = _safe_name(name)
+        path = Path(INBOX_DIR) / safe
+        if not path.is_file():
+            raise HTTPException(status_code=404,
+                                detail=f"ファイルが見つかりません: {safe}")
+        try:
+            path.unlink()
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"削除できませんでした: {safe}") from exc
+        logger.info("upload deleted")
+        return {"deleted": safe}
+
     # -------------------------------------------------- ジョブ
     @app.post("/api/jobs", status_code=202)
     def api_create_job(req: JobRequest) -> dict[str, Any]:
@@ -216,6 +260,7 @@ def create_app() -> FastAPI:
             "causal_verify": req.causal_verify,
             "target": req.target,
             "offline": req.offline,
+            "learned": req.learned,
             "kg_file": _resolve_kg_file(req.kg_file) if req.kg_file else None,
         }
         if req.offline and not params["kg_file"]:
@@ -265,6 +310,22 @@ def create_app() -> FastAPI:
         return FileResponse(path, media_type="application/json",
                             filename=f"session_{session}.excalidraw")
 
+    @app.post("/api/sessions/{session}/render")
+    def api_session_render(session: str, level: str = Query("standard")) -> dict[str, Any]:
+        """今の詳細度をローカル Excalidraw canvas へ描画する (設計書 §2.1)。
+
+        canvas は 1 面しかないため、生成ジョブ・編集と同じ JobManager の
+        ロックで直列化する (run_exclusive は既存の _pool.submit(...).result()
+        ヘルパ)。MCP/canvas に繋がらない場合は 503。
+        """
+        _session_or_404(session)
+        _check_level(level)
+        try:
+            return app.state.jobs.run_exclusive(
+                sessions_mod.render_to_canvas, session, level)
+        except sessions_mod.RenderConnectionError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     @app.get("/api/sessions/{session}/view")
     def api_session_view(session: str, level: str = Query("standard")) -> dict[str, Any]:
         _session_or_404(session)
@@ -284,6 +345,59 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except GapDecisionError as exc:  # 確定済みの再確定 (上書きしない)
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    # -------------------------------------------------- 編集 (§8.1)
+    @app.get("/api/sessions/{session}/edits")
+    def api_edits(session: str) -> dict[str, Any]:
+        _session_or_404(session)
+        return sessions_mod.list_edits(session)
+
+    @app.post("/api/sessions/{session}/edits")
+    def api_add_edit(session: str, req: EditRequest,
+                     level: str | None = Query(None)) -> dict[str, Any]:
+        _session_or_404(session)
+        if level:
+            _check_level(level)
+        op = {"op": req.op, "target": req.target, "payload": req.payload}
+        try:
+            # 生成ジョブと同じワーカーで直列化する (plan の二重書き込み防止)
+            return app.state.jobs.run_exclusive(
+                sessions_mod.apply_edit, session, op,
+                user=account.current_user_id(), level=level)
+        except EditError as exc:
+            raise _edit_http_error(exc) from exc
+
+    @app.post("/api/sessions/{session}/edits/{edit_id}/revert")
+    def api_revert_edit(session: str, edit_id: str,
+                        level: str | None = Query(None)) -> dict[str, Any]:
+        _session_or_404(session)
+        if level:
+            _check_level(level)
+        try:
+            return app.state.jobs.run_exclusive(
+                sessions_mod.revert_edit, session, edit_id,
+                user=account.current_user_id(), level=level)
+        except EditError as exc:
+            raise _edit_http_error(exc) from exc
+
+    @app.get("/api/learned")
+    def api_learned() -> dict[str, Any]:
+        """学習ストアの中身 (設定画面の透明性表示用。§8.1)。
+
+        「何を機械が自動適用するのか」を利用者がいつでも確認できることが
+        「黙って直さない」原則 (§1) の担保になるので、要約だけでなく
+        エントリ本体も返す。
+        """
+        store = load_learned()
+        return {
+            "summary": summarize_learned(store),
+            "lexicon": store.get("lexicon", []),
+            "stoplist": store.get("stoplist", []),
+            "causal_overrides": store.get("causal_overrides", []),
+            "few_shot": store.get("few_shot", []),
+            "cue_stats": store.get("cue_stats", {}),
+            "warnings": cue_warnings(store),
+        }
 
     @app.post("/api/sessions/{session}/expand/{aggregate_id}")
     def api_expand(session: str, aggregate_id: str) -> dict[str, Any]:

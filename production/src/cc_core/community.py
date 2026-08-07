@@ -242,12 +242,17 @@ def _select_k(
     importance: dict[str, ImportanceBreakdown],
     communities: dict[str, str],
     k: int,
+    pinned: frozenset[str] = frozenset(),
 ) -> list[str]:
     """重要度上位 k 件を選ぶ。ただし各コミュニティから最低 1 つを確保する。
 
     単純な上位 K だと 1 つのコミュニティに偏って「島」が丸ごと消えるため、
     まず各コミュニティの最重要ノードを確保し、残り枠を全体順で埋める。
     これにより Overview でも全テーマが地図上に残る (v3 §2.4「全体俯瞰」)。
+
+    pinned (ユーザーが編集で触れたノード) は重要度に関係なく**先に確定**する。
+    編集したノードが Top-K から落ちると「直したのに消えた」体験になるため
+    (編集/学習設計書 §4.1)。pinned だけで k を超える場合は超過を許容する。
     """
     by_comm: dict[str, list[str]] = {}
     for node, cid in communities.items():
@@ -257,13 +262,18 @@ def _select_k(
     def rank_key(n: str) -> tuple[float, str]:
         return (-importance[n].total, n)  # 重要度降順 → 同点は id 昇順 (決定性)
 
-    selected: list[str] = []
+    selected: list[str] = sorted((n for n in pinned if n in importance), key=rank_key)
+    covered = {communities.get(n) for n in selected}
     for cid in sorted(by_comm, key=lambda c: (-len(by_comm[c]), c)):
+        if cid in covered:
+            continue  # ピン留めで既に代表がいる島は埋めない
         members = sorted(by_comm[cid], key=rank_key)
         if members and len(selected) < k:
             selected.append(members[0])
+            covered.add(cid)
 
-    for n in sorted((n for n in importance if n not in selected), key=rank_key):
+    chosen = set(selected)
+    for n in sorted((n for n in importance if n not in chosen), key=rank_key):
         if len(selected) >= k:
             break
         selected.append(n)
@@ -293,29 +303,35 @@ def select_nodes(
     *,
     total_nodes: int | None = None,
     min_members: int = 2,
+    pinned: Iterable[str] | None = None,
 ) -> list[str]:
     """指定した詳細度で表示する概念ノードを Top-K 選抜する。
 
     **集約ノードも画面上の表示枠を消費する**ため、概念数 + 集約数が帯の上限を
     超えないよう概念枠を削って収束させる。認知負荷 (v3 §2.4) は「画面に出る
     要素の総数」で決まり、集約ノードも読む対象だからである。
+
+    pinned はユーザーが編集で触れたノード。帯の上限より優先し、超過しても
+    落とさない (編集/学習設計書 §4.1。超過は check_level_bands が
+    `user_pinned_overflow` として区別して報告する)。
     """
     total = total_nodes if total_nodes is not None else len(importance)
     hi = LEVEL_BANDS[level][1]
     n_comms = len(set(communities.values())) or 1
+    pins = frozenset(p for p in (pinned or ()) if p in importance)
 
     k = _target_count(level, total)
-    selected = _select_k(importance, communities, k)
+    selected = _select_k(importance, communities, k, pins)
     if total <= hi and k >= total:
         return selected  # 全部表示できるなら集約は生じない
 
     # (1) 概念 k + 集約 a <= hi になるまで k を下げる
     for _ in range(12):
         aggs = count_aggregates(communities, selected, min_members=min_members)
-        if len(selected) + aggs <= hi or k <= n_comms:
+        if len(selected) + aggs <= hi or k <= n_comms or k <= len(pins):
             break
         k = max(n_comms, hi - aggs)
-        selected = _select_k(importance, communities, k)
+        selected = _select_k(importance, communities, k, pins)
 
     # (2) それでも超えるなら (コミュニティ数が多く「代表 + 集約」で 2 枠ずつ
     #     消費している状態)、重要度の低いコミュニティから代表を落とし、
@@ -338,7 +354,9 @@ def select_nodes(
         reps = [n for n in members_of[cid] if n in selected_set]
         # 全メンバーを隠しても集約が成立する (>= min_members) 場合のみ落とす。
         # そうでないと島そのものが地図から消えてしまう。
-        if len(reps) == 1 and len(members_of[cid]) >= min_members:
+        # ピン留めは何があっても落とさない (§4.1)。
+        if len(reps) == 1 and len(members_of[cid]) >= min_members \
+                and reps[0] not in pins:
             selected_set.discard(reps[0])
 
     return sorted(selected_set, key=lambda n: (-importance[n].total, n))
@@ -463,6 +481,52 @@ def expand_aggregate(plan: dict[str, Any], aggregate_id: str) -> list[str]:
 # ------------------------------------------------------------- 一括計算
 
 
+def apply_frozen_communities(
+    kg: dict[str, Any],
+    g: nx.Graph,
+    frozen: dict[str, str],
+) -> dict[str, str]:
+    """凍結マップを現在のグラフへ適用する (編集/学習設計書 §4.3)。
+
+    `analyze()` は Leiden を毎回再実行する仕様なので、1 本エッジを消しただけで
+    全コミュニティが組み替わりうる。編集のたびに島がシャッフルされると
+    「無関係な島まで変わった」という不信を招くため、編集時は前回の割当を
+    そのまま使う。
+
+    マップに無い新ノードは **隣接ノードの多数決** (同数は community_id の
+    辞書順最小) で決める。隣接が全て未確定なノードが残らないよう、決まった
+    ものを取り込みながら安定するまで繰り返す。孤立ノードは KG 側の
+    community_id (add_node が決めた所属) に従う。
+    """
+    node_meta = {str(n["id"]): n for n in kg.get("nodes", [])}
+    mapping: dict[str, str] = {nid: frozen[nid] for nid in node_meta if nid in frozen}
+    pending = [nid for nid in sorted(node_meta) if nid not in mapping]
+
+    for _ in range(len(pending) + 1):
+        progressed = False
+        for nid in list(pending):
+            if nid in mapping:
+                continue
+            votes: dict[str, int] = {}
+            for nb in (g.neighbors(nid) if nid in g else ()):
+                cid = mapping.get(str(nb))
+                if cid:
+                    votes[cid] = votes.get(cid, 0) + 1
+            if votes:
+                mapping[nid] = min(votes, key=lambda c: (-votes[c], c))
+                progressed = True
+        pending = [nid for nid in pending if nid not in mapping]
+        if not progressed or not pending:
+            break
+
+    for nid in pending:  # 隣接から決められない (孤立した追加ノードなど)
+        mapping[nid] = str(node_meta[nid].get("community_id") or "comm_000")
+
+    logger.info("communities frozen nodes=%d new=%d",
+                len(mapping), len(mapping) - len(frozen))
+    return mapping
+
+
 @dataclass
 class DetailAnalysis:
     """3 レベル分の選抜結果 (layout 生成の入力)。"""
@@ -471,6 +535,7 @@ class DetailAnalysis:
     importance: dict[str, ImportanceBreakdown]
     visible: dict[str, list[str]]           # level -> node_ids
     aggregates: dict[str, list[Aggregate]]  # level -> aggregates
+    pinned: set[str] = field(default_factory=set)
 
     def visible_at(self, node_id: str) -> dict[str, bool]:
         return {lv: node_id in self.visible[lv] for lv in LEVEL_ORDER}
@@ -482,15 +547,24 @@ def analyze(
     weights: dict[str, float] | None = None,
     community_names: dict[str, str] | None = None,
     resolution: float = 1.0,
+    frozen_communities: dict[str, str] | None = None,
+    pinned: Iterable[str] | None = None,
 ) -> DetailAnalysis:
     """knowledge_graph から 3 レベル分の可視ノードと集約を決定的に導出する。
 
     knowledge_graph が community_id を持っている場合でも、Leiden の結果を
     正とする (LLM が付けたコミュニティは粒度が不安定なため)。ただし
     communities[].name は集約ラベルのヒントとして利用する。
+
+    frozen_communities を渡すと `detect_communities()` を**呼ばず**そのマップを
+    使う (編集後の再構成用。§4.3)。pinned は Top-K 選抜で必ず残すノード (§4.1)。
+    重要度は凍結時も再計算する — 決定的で、編集後のグラフに対して正しいため。
     """
     g = build_graph(kg)
-    detected = detect_communities(g, resolution=resolution)
+    if frozen_communities:
+        detected = apply_frozen_communities(kg, g, frozen_communities)
+    else:
+        detected = detect_communities(g, resolution=resolution)
 
     # LLM 由来のコミュニティ名を Leiden コミュニティへ引き継ぐ
     # (Leiden コミュニティ内で最も多い元コミュニティの名前を採用)
@@ -511,11 +585,12 @@ def analyze(
 
     importance = score_importance(g, kg, weights=weights)
     total = len(importance)
+    pins = {p for p in (pinned or ()) if p in importance}
 
     visible: dict[str, list[str]] = {}
     aggregates: dict[str, list[Aggregate]] = {}
     for level in LEVEL_ORDER:
-        sel = select_nodes(importance, detected, level, total_nodes=total)
+        sel = select_nodes(importance, detected, level, total_nodes=total, pinned=pins)
         visible[level] = sel
         aggregates[level] = build_aggregates(
             kg, detected, importance, sel, community_names=names,
@@ -523,8 +598,8 @@ def analyze(
         )
 
     logger.info(
-        "detail analysis nodes=%d communities=%d visible=%s",
-        total, len(set(detected.values())),
+        "detail analysis nodes=%d communities=%d pinned=%d visible=%s",
+        total, len(set(detected.values())), len(pins),
         {lv: len(visible[lv]) for lv in LEVEL_ORDER},
     )
-    return DetailAnalysis(detected, importance, visible, aggregates)
+    return DetailAnalysis(detected, importance, visible, aggregates, pins)

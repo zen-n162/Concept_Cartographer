@@ -153,6 +153,15 @@
                 }
               }
             }
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "user_edited",
+              "user_added"
+            ],
+            "description": "要素の出所 (編集/学習設計書 §2)。無印は AI 生成。user_* はユーザーが編集/追加したもので、因果精度 KPI の分母からは除外する。"
           }
         }
       }
@@ -313,6 +322,15 @@
               "type": "string"
             },
             "description": "縮約エッジが代表している元エッジ (内部情報を失わない, v4核§6.4)"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "user_edited",
+              "user_added"
+            ],
+            "description": "要素の出所 (編集/学習設計書 §2)。無印は AI 生成。user_* はユーザーが編集/追加したもので、因果精度 KPI の分母からは除外する。"
           }
         }
       }
@@ -393,6 +411,10 @@
             },
             "aggregates": {
               "type": "integer"
+            },
+            "pinned": {
+              "type": "integer",
+              "description": "そのレベルで表示中の、編集によりピン留めされたノード数 (§4.1)"
             }
           }
         },
@@ -408,6 +430,10 @@
             },
             "aggregates": {
               "type": "integer"
+            },
+            "pinned": {
+              "type": "integer",
+              "description": "そのレベルで表示中の、編集によりピン留めされたノード数 (§4.1)"
             }
           }
         },
@@ -423,6 +449,10 @@
             },
             "aggregates": {
               "type": "integer"
+            },
+            "pinned": {
+              "type": "integer",
+              "description": "そのレベルで表示中の、編集によりピン留めされたノード数 (§4.1)"
             }
           }
         }

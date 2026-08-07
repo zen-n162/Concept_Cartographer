@@ -26,8 +26,10 @@ from cc_core.logging_util import get_logger
 logger = get_logger("cc_core.evaluation")
 
 RELATION_VERDICTS = ("correct", "incorrect", "undecidable")  # v3 §7.2.1
+# edit_revert は「編集の取り消し」。correction_rate の分子には**入れない**
+# (取り消しは修正の追加ではなく撤回なので、修正率を二重に押し上げてしまう)。
 OPERATIONS = ("level_switch", "expand_aggregate", "edit_node", "edit_edge",
-              "delete_element", "export", "view_evidence")
+              "delete_element", "export", "view_evidence", "edit_revert")
 
 
 @dataclass
@@ -188,8 +190,15 @@ def causal_precision_log(plan: dict[str, Any]) -> dict[str, Any]:
     """因果ラベル精度の計測開始 (R1) — 3 点セットの通過状況を集計する。
 
     R1 は「計測開始」が出口条件 (計画 §9)。R2 で正解セットと突き合わせる。
+
+    **ユーザーが編集・追加した関係は分母から除外する** (編集/学習設計書 §2)。
+    この KPI は AI の抽出性能を測るものなので、人が手で直したものを混ぜると
+    「直せば直すほど精度が上がる」誤った読みになる。
     """
-    edges = plan.get("edges", [])
+    edges = [e for e in plan.get("edges", [])
+             if not str(e.get("origin") or "").startswith("user")]
+    user_edges = sum(1 for e in plan.get("edges", [])
+                     if str(e.get("origin") or "").startswith("user"))
     checked = [e for e in edges if e.get("causal_check")]
     passed = [e for e in checked if e.get("glyph") == "arrow"]
     demoted = [e for e in checked if e["causal_check"].get("demoted_from") == "arrow"]
@@ -202,6 +211,7 @@ def causal_precision_log(plan: dict[str, Any]) -> dict[str, Any]:
         "independently_verified": len(verified),
         "verification_coverage": (
             round(len(verified) / len(passed), 3) if passed else None),
+        "user_edges_excluded": user_edges,
     }
 
 

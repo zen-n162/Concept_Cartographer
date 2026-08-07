@@ -9,12 +9,27 @@
   # 生成済み地図の詳細度を切り替える (LLM 呼び出しゼロ・再レイアウトなし)
   python -m cc_orchestrator.chat --switch graphs/layout_plan_session_X.json --level overview
 
+  # 生成済み plan を今すぐローカル canvas へ描く (生成し直さない)
+  python -m cc_orchestrator.chat --render graphs/layout_plan_session_X.json --level standard
+
   # 集約ノードを展開する (ドリルダウン)
   python -m cc_orchestrator.chat --expand agg-comm_001 --plan graphs/layout_plan_session_X.json
 
   # ギャップ候補の確定 (confirm / dismiss)
   python -m cc_orchestrator.chat --gap-list --plan <plan.json>
   python -m cc_orchestrator.chat --gap-confirm gap-isolated-c003 --plan <plan.json>
+
+  # 概念図の編集 (原本は不変。編集ログへ追記し plan を再構成する)
+  python -m cc_orchestrator.chat --plan <plan.json> \
+      --edit '{"op":"rename_node","target":"c001","payload":{"label":"新しい名前"}}'
+  python -m cc_orchestrator.chat --plan <plan.json> --edit-file ops.json
+  python -m cc_orchestrator.chat --plan <plan.json> --list-edits
+  python -m cc_orchestrator.chat --plan <plan.json> --revert-edit e-20260807-001
+
+  # 過去の修正からの学習
+  python -m cc_orchestrator.chat --show-learned
+  python -m cc_orchestrator.chat --relearn
+  python -m cc_orchestrator.chat "今週の研究を..." --no-learned
 
   # エージェント登録/更新
   python -m cc_orchestrator.chat --setup-agents
@@ -24,15 +39,33 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from cc_core.community import expand_aggregate
 from cc_core.detail import project
+from cc_core.editing import (
+    EditError,
+    PLAN_PREFIX,
+    annotate_edits,
+    append_edit,
+    load_edits,
+    rebuild_session,
+)
 from cc_core.gaps import apply_decision, usefulness_rate
+from cc_core.learning import (
+    cue_warnings,
+    load_learned,
+    relearn,
+    report_line,
+    summarize,
+    update_from_edit,
+)
 from cc_core.svg_export import write_svg
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
 from cc_orchestrator.pipeline import ensure_agents, run_pipeline
+from cc_orchestrator.tool_exec import ToolExecutor
 
 LEVELS = ("overview", "standard", "detailed")
 
@@ -76,6 +109,10 @@ def _print_summary(s: dict) -> None:
             + (f"(集約{v['aggregates']})" if v.get("aggregates") else "")
             for k, v in lv.items())
         print(f"🔍 詳細度: {cells}   帯検査: {s.get('band_check')}")
+    lr = s.get("learned") or {}
+    if lr.get("enabled"):
+        print(f"🎓 {report_line(lr)}"
+              + (" (詳細は summary.learned.details)" if lr.get("details") else ""))
     gp = s.get("gaps", {})
     if gp:
         print(f"❓ ギャップ候補: {gp['candidates']} 件 {gp['by_type']}")
@@ -100,6 +137,100 @@ def _load_plan(path: str) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+# ------------------------------------------------------------------ 編集
+
+
+def _session_of(plan_path: str) -> tuple[str, Path]:
+    """--plan からセッション ID と graphs ディレクトリを取り出す。"""
+    stem = Path(plan_path).stem
+    if not stem.startswith(PLAN_PREFIX):
+        sys.exit(f"--plan には {PLAN_PREFIX}*.json を指定してください: {plan_path}")
+    return stem[len(PLAN_PREFIX):], Path(plan_path).parent
+
+
+def _print_edits(session: str, graphs_dir: Path) -> None:
+    rows = annotate_edits(load_edits(session, graphs_dir=graphs_dir))
+    if not rows:
+        print("✏️  編集はまだありません")
+        return
+    live = sum(1 for r in rows if r["op"] != "revert" and not r["reverted"])
+    print(f"✏️  編集 {len(rows)} 行 (有効 {live} / 取り消し済み "
+          f"{sum(1 for r in rows if r['reverted'])})")
+    for row in rows:
+        mark = "✖" if row["reverted"] else ("↩" if row["op"] == "revert" else "•")
+        detail = json.dumps(row.get("payload") or {}, ensure_ascii=False)
+        line = (f"  {mark} {row['edit_id']}  {row['op']:<13s} "
+                f"{str(row.get('target') or '-'):<16s} {detail[:52]}")
+        print(line + (f"   [取り消し: {row.get('reverted_by')}]" if row["reverted"] else ""))
+
+
+def _print_learned(store: dict) -> None:
+    s = summarize(store)
+    print(f"🎓 学習ストア (scope={s['scope']} / 更新 {s['updated_at'] or '—'})")
+    print(f"   用語辞書  {s['lexicon']} 件 (自動適用 {s['lexicon_auto']})")
+    for e in store.get("lexicon", [])[:8]:
+        print(f"     {'✓' if e.get('auto') else '·'} 「{e['from']}」→「{e['to']}」"
+              f" (n={e.get('n', 1)})")
+    print(f"   除外リスト {s['stoplist']} 件 (自動適用 {s['stoplist_auto']})")
+    for e in store.get("stoplist", [])[:8]:
+        print(f"     {'✓' if e.get('auto') else '·'} 「{e['label']}」 (n={e.get('n', 1)})")
+    print(f"   因果上書き {s['causal_overrides']} 件 {s['by_decision']}")
+    for o in store.get("causal_overrides", [])[:8]:
+        print(f"     · 「{o['from_label']}」→「{o['to_label']}」: {o['decision']}"
+              f" ({o.get('source', '')})")
+    print(f"   事例ヒント {s['few_shot']} 件 / 語彙統計 {s['cue_stats']} 語")
+    for f in store.get("few_shot", [])[:5]:
+        print(f"     · {f['text']}")
+    for w in cue_warnings(store):
+        print(f"   ⚠ {w}")
+    print("   ※ 「学習」はモデルの再学習ではありません。用語辞書・除外リスト・"
+          "因果上書きの決定的な適用と、抽出プロンプトへの注意書き注入です。")
+
+
+def _run_edits(args: argparse.Namespace) -> None:
+    """--edit / --edit-file / --revert-edit を適用し plan を再構成する。"""
+    session, graphs_dir = _session_of(args.plan)
+    ops: list[dict] = []
+    if args.edit:
+        parsed = json.loads(args.edit)
+        ops.extend(parsed if isinstance(parsed, list) else [parsed])
+    if args.edit_file:
+        parsed = json.loads(Path(args.edit_file).read_text(encoding="utf-8"))
+        ops.extend(parsed if isinstance(parsed, list) else [parsed])
+    if args.revert_edit:
+        ops.append({"op": "revert", "target": args.revert_edit})
+
+    applied: list[dict] = []
+    for op in ops:
+        try:
+            row = append_edit(session, op, graphs_dir=graphs_dir, user=args.user)
+        except EditError as exc:
+            sys.exit(f"❌ {exc}")
+        applied.append(row)
+        print(f"✏️  {row['edit_id']}  {row['op']} {row.get('target') or ''}")
+
+    plan = rebuild_session(session, graphs_dir=graphs_dir, default_level=args.level)
+    lv = plan.get("levels", {})
+    print(f"🔍 再構成: " + "  ".join(f"{k}={v['nodes']}" for k, v in lv.items())
+          + f"   (編集 {plan['provenance'].get('edit_count')} 件反映)")
+    for w in plan.get("provenance", {}).get("edit_warnings", []):
+        print(f"   ⚠ {w}")
+
+    delta = update_from_edit(applied[-1], session, graphs_dir=graphs_dir)
+    if delta["changed"]:
+        print(f"🎓 学習を更新: {delta['changed']}")
+
+    if args.target == "file":
+        from cc_core.excalidraw_file import write_scene
+        for level in LEVELS:
+            out = write_svg(project(plan, level),
+                            f"exports/session_{session}_{level}.svg")
+            print(f"   SVG[{level}]: {out}")
+        scene = write_scene(project(plan, plan.get("detail_level", "standard")),
+                            f"exports/session_{session}.excalidraw")
+        print(f"💾 {scene}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Concept Cartographer (実運用版 R1)")
     ap.add_argument("message", nargs="?", help="依頼文 (省略時は対話モード)")
@@ -118,16 +249,59 @@ def main() -> None:
     ap.add_argument("--plan", default=None, help="操作対象の layout_plan.json")
     ap.add_argument("--switch", default=None, metavar="PLAN",
                     help="詳細度を切り替えて SVG 出力 (--level と併用)")
+    ap.add_argument("--render", default=None, metavar="PLAN",
+                    help="plan を再生成せず今すぐローカル canvas へ描画 (--level と併用)")
     ap.add_argument("--expand", default=None, metavar="AGG_ID",
                     help="集約ノードを展開してメンバーを表示")
     ap.add_argument("--gap-list", action="store_true", help="ギャップ候補を一覧")
     ap.add_argument("--gap-confirm", default=None, metavar="GAP_ID")
     ap.add_argument("--gap-dismiss", default=None, metavar="GAP_ID")
     ap.add_argument("--user", default="local-user", help="確定操作の記録者")
+    # --- 編集とフィードバック学習 (編集/学習設計書 §7) ---
+    ap.add_argument("--edit", default=None, metavar="JSON",
+                    help='編集 1 件 (例: \'{"op":"rename_node","target":"c001",'
+                         '"payload":{"label":"新名"}}\')')
+    ap.add_argument("--edit-file", default=None, metavar="FILE",
+                    help="編集操作の JSON 配列ファイル (バッチ)")
+    ap.add_argument("--list-edits", action="store_true",
+                    help="編集履歴を一覧 (取り消し済みマーク付き)")
+    ap.add_argument("--revert-edit", default=None, metavar="EDIT_ID",
+                    help="編集を取り消す (取り消し行を追記)")
+    ap.add_argument("--show-learned", action="store_true",
+                    help="learned.json の要約を表示")
+    ap.add_argument("--relearn", action="store_true",
+                    help="編集ログから learned.json を再構成")
+    ap.add_argument("--no-learned", action="store_true",
+                    help="過去の修正からの学習を適用しない")
     args = ap.parse_args()
 
     if args.setup_agents:
         print(json.dumps(ensure_agents(FoundryAgentsV2()), indent=2, ensure_ascii=False))
+        return
+
+    # --- 学習ストア (LLM 不要) ---
+    if args.relearn:
+        store = relearn()
+        print("🔁 編集ログから learned.json を再構成しました\n")
+        _print_learned(store)
+        return
+    if args.show_learned:
+        _print_learned(load_learned())
+        return
+
+    # --- 編集 (LLM 不要。Web と同一の cc_core.editing を通す) ---
+    if args.edit or args.edit_file or args.revert_edit or args.list_edits:
+        if not args.plan:
+            sys.exit("編集操作には --plan が必要です")
+        if args.list_edits and not (args.edit or args.edit_file or args.revert_edit):
+            session, graphs_dir = _session_of(args.plan)
+            _print_edits(session, graphs_dir)
+            return
+        _run_edits(args)
+        if args.list_edits:
+            session, graphs_dir = _session_of(args.plan)
+            print()
+            _print_edits(session, graphs_dir)
         return
 
     # --- 詳細度切替 (再生成なし: v3 §2.4) ---
@@ -140,6 +314,20 @@ def main() -> None:
         note = " (再計算が必要)" if view.get("_needs_recompute") else " (再生成なし)"
         print(f"🔍 {level}: {len(view['nodes'])} ノード (集約 {agg}) / "
               f"{len(view['edges'])} 関係{note}\n💾 {out}")
+        return
+
+    # --- ローカル canvas への描画のみ (再生成なし: ミニ設計 §4) ---
+    if args.render:
+        if not Path(args.render).exists():
+            sys.exit(f"❌ plan が見つかりません: {args.render}")
+        plan = _load_plan(args.render)
+        level = args.level or "standard"
+        view = project(plan, level)
+        result = ToolExecutor(target="local").tool_render_layout_plan({"plan": view})
+        if not result.get("success"):
+            sys.exit(f"❌ 描画に失敗しました: {'; '.join(result.get('errors', []))}")
+        url = os.environ.get("EXCALIDRAW_CANVAS_URL", "http://127.0.0.1:3000")
+        print(f"🖼  {level}: {len(result.get('created', []))} 要素を描画しました\n💾 {url}")
         return
 
     # --- ドリルダウン (v3 §2.4④) ---
@@ -188,7 +376,8 @@ def main() -> None:
             summary = run_pipeline(
                 message, target=args.target, paths=args.path, kg_file=args.kg,
                 local_only=args.local_only, detail_level=args.level,
-                verify_causal=not args.no_causal_verify, export_svg=not args.no_svg)
+                verify_causal=not args.no_causal_verify, export_svg=not args.no_svg,
+                learned=not args.no_learned)
         except Exception as exc:
             print(f"❌ 失敗: {type(exc).__name__}: {exc}", file=sys.stderr)
             return

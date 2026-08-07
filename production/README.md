@@ -38,8 +38,20 @@ python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m cc_orchestrator.chat --gap-list --plan <plan.json>
 ./.venv/bin/python -m cc_orchestrator.chat --gap-confirm gap-isolated-c003 --plan <plan.json>
 
+# 概念図の編集 (原本は書き換えず edits_session_*.jsonl へ追記)
+./.venv/bin/python -m cc_orchestrator.chat --plan <plan.json> \
+  --edit '{"op":"rename_node","target":"n3","payload":{"label":"新しい名前"}}'
+./.venv/bin/python -m cc_orchestrator.chat --plan <plan.json> --edit-file ops.json
+./.venv/bin/python -m cc_orchestrator.chat --plan <plan.json> --list-edits
+./.venv/bin/python -m cc_orchestrator.chat --plan <plan.json> --revert-edit e-20260807-001
+
+# 修正から学習した内容の確認・再構成・無効化
+./.venv/bin/python -m cc_orchestrator.chat --show-learned
+./.venv/bin/python -m cc_orchestrator.chat --relearn
+./.venv/bin/python -m cc_orchestrator.chat "今週の研究を..." --no-learned
+
 # テスト
-./.venv/bin/pytest -m "not e2e"      # 153 件
+./.venv/bin/pytest -m "not e2e"      # 223 件
 ```
 
 描画先は `--target local`（Excalidraw MCP）が既定。ACA 到達前は
@@ -92,6 +104,10 @@ FastAPI 127.0.0.1:8090          src/cc_web/
 | `POST /api/sessions/{s}/expand/{agg}` | 集約ノードの展開（未知は 404） |
 | `POST /api/sessions/{s}/evaluation` | 満足度 / 関係評価 / 操作ログ → `logs/evaluation.jsonl` |
 | `GET /api/history` | `logs/web_history.jsonl` の逆順 50 件 |
+| `GET/POST /api/sessions/{s}/edits` | 編集履歴の取得と適用（8 操作。適用のたび再構成） |
+| `POST /api/sessions/{s}/edits/{eid}/revert` | 編集の取り消し（二重取り消しは 409） |
+| `GET /api/learned` | 過去の修正から学習した内容の要約 |
+| `DELETE /api/files/{name}` | `inbox/` のファイル削除（アップロードの取り消し） |
 
 `run_pipeline(..., offline=True)` は **Foundry を一切呼ばない**実行モード
 （保存済み KG から詳細度計算以降だけを回す。`kg_file` 必須）。Web のテストは
@@ -181,10 +197,35 @@ LLM は指示どおりの形を返すとは限らない。実際に `evidence_sp
 返さないため、その場合の trace back は document 粒度になる（`surface` の
 逐語引用は必須なので、因果の語彙証拠検査は成立する）。
 
+## 概念図の編集とフィードバック学習（R1.5）
+
+生成された地図はユーザーが直せる。**原本 (`kg_session_*.json`) は書き換えず**、
+編集は `edits_session_*.jsonl` へ 1 行 1 操作で追記する。現在の姿は常に
+`fold(原本, 編集ログ)` で決定的に再構成でき、取り消しも「取り消し行の追記」で表す。
+AI が出したものと人が直したものの差分が永久に残るので、それが学習の材料になる。
+
+編集できるのは 8 操作: 概念の改名 / 追加 / 削除、関係のラベル / 種類 / 向き / 削除 / 追加。
+再構成では**島をシャッフルしない**（コミュニティを凍結）、**編集した概念は
+どの詳細度でも消えない**（ピン留め）ようにしている。
+
+「学習」はモデルの重みを変えるものではない。実体は 3 つ:
+
+1. **決定的な自動適用** — 改名は用語辞書へ（写像が一意なときだけ）、削除は除外リストへ
+   （同じ概念を 2 回以上消したときだけ）、関係の種類変更・向き反転は**因果上書き表**へ
+   （以後その概念対は 3 点セットの LLM 検証を省いて確定。人の判断が最終権威）
+2. **抽出プロンプトへの事例注入** — 見落とされた関係などを「過去の修正からの注意」として付加
+3. **因果語彙の統計記録** — よく降格される手がかり語を記録（自動降格はせず、人が判断）
+
+適用内容は必ず実行サマリに出る（黙って直さない）。`--no-learned` / Web の設定で無効化できる。
+
+R1.5 より前のセッションは関係ポリシー適用**前**の KG を原本として保存していたため、
+そのまま再構成すると降格済みの相関が因果矢印へ戻る【実測: 6 本】。`rebuild_session` は
+前回 plan の判定を正として戻し、その内容を `provenance.policy_reconciled` に残す。
+
 ## 検証状況
 
-- ユニット / 統合テスト **153 件 pass**（可変詳細度 21 件・R1 機能 44 件・正規化 20 件・
-  Web アプリ 34 件）
+- ユニット / 統合テスト **223 件 pass**（可変詳細度 21 件・R1 機能 44 件・正規化 20 件・
+  Web アプリ 34 件・編集 30 件・学習 20 件・Web 編集 API 16 件ほか）
 - 実キャンバスへの 3 レベル描画で **すべて検証 PASS**（overview 38 / standard 48 / detailed 48 要素）
 - `--target file`（MCP なし fallback）でも描画 82 要素・オフライン検証 PASS
 - スケール実測: 400 概念まで帯遵守・重なりゼロ・0.18 秒

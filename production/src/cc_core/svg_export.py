@@ -132,6 +132,9 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
         # 線とラベルの両方に付ける — 細い線は当たり判定が小さく、実際には
         # ラベルを押されることが多いため。
         eid = f' data-edge-id="{_esc(edge["id"])}" class="cc-edge"'
+        # ユーザーが編集/追加した関係は UI でバッジを出す (編集/学習設計書 §8.2)
+        if str(edge.get("origin") or "").startswith("user"):
+            eid += ' data-origin="user"'
         parts.append(
             f'<g{eid}{grp}><line x1="{ax:.0f}" y1="{ay:.0f}" x2="{bx:.0f}" '
             f'y2="{by:.0f}" '
@@ -172,6 +175,8 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
                f'data-kind="{"aggregate" if is_agg else "concept"}"')
         if is_agg:
             nid += f' data-aggregate-id="{_esc(node.get("aggregate_id", node["id"]))}"'
+        if str(node.get("origin") or "").startswith("user"):
+            nid += ' data-origin="user"'
         parts.append(
             f'<g{nid}{grp}><ellipse cx="{cx:.0f}" cy="{cy:.0f}" '
             f'rx="{node["size"] / 2:.0f}" '

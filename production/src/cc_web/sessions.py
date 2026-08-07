@@ -13,22 +13,27 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
+from cc_core import editing
 from cc_core.community import LEVEL_ORDER, expand_aggregate
 from cc_core.detail import project
 from cc_core.evaluation import summarize
 from cc_core.gaps import apply_decision, usefulness_rate
+from cc_core.learning import update_from_edit
 from cc_core.logging_util import get_logger
 from cc_core.svg_export import write_svg
+from cc_orchestrator.tool_exec import ToolExecutor
 
 logger = get_logger("cc_web.sessions")
 
 GRAPHS_DIR = "graphs"
 SVG_CACHE_DIR = "exports/web"
 PLAN_PREFIX = "layout_plan_session_"
+CANVAS_URL_ENV = "EXCALIDRAW_CANVAS_URL"
 
 # セッション ID はファイル名の一部になる。`..` や `/` を弾いて
 # パストラバーサルを防ぐ (受け取った文字列でパスを組み立てないのが原則だが、
@@ -38,9 +43,9 @@ SESSION_RE = re.compile(r"^[0-9A-Za-z_\-]{1,64}$")
 # view JSON へ通すエッジ属性 (v4核§6.3)。plan の内部キー (_conf 等) は出さない。
 EDGE_FIELDS = ("id", "from", "to", "label", "glyph", "confidence",
                "epistemic_status", "evidence_span", "causal_check",
-               "member_edge_ids", "polarity", "provenance")
+               "member_edge_ids", "polarity", "provenance", "origin")
 NODE_FIELDS = ("id", "label", "kind", "community_id", "importance",
-               "aggregate_id", "visible_at")
+               "aggregate_id", "visible_at", "origin")
 
 
 class SessionNotFound(LookupError):
@@ -154,7 +159,58 @@ def view_of(session: str, level: str) -> dict[str, Any]:
         "aggregates": view.get("aggregates", []),
         "gaps": view.get("gaps", []),
         "levels": view.get("levels", {}),
+        "islands": [{"community_id": i.get("community_id"), "name": i.get("name")}
+                    for i in view.get("islands", [])],
+        "editable": editing.kg_file(session, graphs_dir=GRAPHS_DIR).exists(),
     }
+
+
+# --------------------------------------------------------- Excalidraw 描画
+
+
+def canvas_url() -> str:
+    """ローカル Excalidraw canvas の URL (設計書 §2.2, 既定 127.0.0.1:3000)。
+
+    呼び出しのたびに読む (import 時に固定しない) — テストが monkeypatch で
+    差し替えられるようにするため。ACA へ移設する際もこの環境変数の
+    差し替えだけで済む。
+    """
+    return os.environ.get(CANVAS_URL_ENV, "http://127.0.0.1:3000")
+
+
+class RenderConnectionError(RuntimeError):
+    """ローカルの Excalidraw (canvas / MCP) に接続できない (設計書 §2.1)。"""
+
+
+def _connection_message() -> str:
+    return (f"ローカルの Excalidraw ({canvas_url()}) に接続できません。"
+            "起動していない可能性があります。")
+
+
+def render_to_canvas(session: str, level: str) -> dict[str, Any]:
+    """指定した詳細度の plan をローカル Excalidraw canvas へ描画する (設計書 §2.1)。
+
+    view_of() と同じ `project(plan, level)` で投影し、描画は既存の
+    `ToolExecutor(target="local").tool_render_layout_plan` にそのまま渡す
+    (新規の描画コードは書かない; 設計書 §1)。canvas は 1 面しかなく
+    clear_before=True で描き直すため、呼び出し元 (app.py) は JobManager と
+    同じロックで直列化すること (生成ジョブ・編集と奪い合わないため)。
+    """
+    check_level(level)
+    plan = load_plan(session)
+    view = project(plan, level)
+    try:
+        result = ToolExecutor(target="local").tool_render_layout_plan({"plan": view})
+    except Exception as exc:  # MCP/canvas 未起動・接続不可など (§2.1)
+        logger.warning("render_to_canvas: connection failed (%s)", type(exc).__name__)
+        raise RenderConnectionError(_connection_message()) from exc
+    if not result.get("success"):
+        logger.warning("render_to_canvas: failed %s", result.get("errors"))
+        raise RenderConnectionError(_connection_message())
+    elements = len(result.get("created", []))
+    logger.info("render_to_canvas session=%s level=%s elements=%d",
+                session, level, elements)
+    return {"url": canvas_url(), "elements": elements, "level": level}
 
 
 # ------------------------------------------------------------------ ギャップ
@@ -173,6 +229,80 @@ def decide_gap(session: str, gap_id: str, decision: str,
     gap = apply_decision(plan, gap_id, decision, user_id=user_id)
     save_plan(session, plan)
     return {"gap": gap, "usefulness": usefulness_rate(plan)}
+
+
+# ------------------------------------------------------------------ 展開
+
+
+# ------------------------------------------------------------------ 編集
+
+
+def purge_svg_cache(session: str) -> int:
+    """そのセッションの SVG キャッシュを捨てる (編集/学習設計書 §8.1)。
+
+    plan の mtime 比較でも再生成はされるが、編集の直後に**確実に**古い絵が
+    出ないよう明示的に消す (キャッシュが原因で「直したのに変わらない」と
+    見えるのが編集機能では一番まずい)。
+    """
+    base = Path(SVG_CACHE_DIR)
+    if not base.exists():
+        return 0
+    removed = 0
+    for path in base.glob(f"{session}_*.svg"):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:  # 他プロセスが掴んでいても致命ではない
+            logger.warning("svg cache not removed: %s", path.name)
+    return removed
+
+
+def list_edits(session: str) -> dict[str, Any]:
+    """編集履歴 + fold 警告。原本 KG が無い古いセッションでも 200 で返す。"""
+    plan_path(session)  # 未知セッションは SessionNotFound
+    edits = editing.load_edits(session, graphs_dir=GRAPHS_DIR)
+    warnings: list[str] = []
+    editable = editing.kg_file(session, graphs_dir=GRAPHS_DIR).exists()
+    if editable:
+        _, warnings = editing.apply_edits(
+            editing.load_kg(session, graphs_dir=GRAPHS_DIR), edits)
+    else:
+        warnings.append(
+            "このセッションには原本の knowledge_graph がないため編集できません")
+    return {"edits": editing.annotate_edits(edits), "warnings": warnings,
+            "editable": editable}
+
+
+def _after_edit(session: str, edit: dict[str, Any],
+                level: str | None) -> dict[str, Any]:
+    """編集 1 件の適用後処理: rebuild → キャッシュ破棄 → 学習更新 → view。"""
+    plan = editing.rebuild_session(session, graphs_dir=GRAPHS_DIR)
+    purge_svg_cache(session)
+    delta = update_from_edit(edit, session, graphs_dir=GRAPHS_DIR)
+    lv = level or plan.get("detail_level", "standard")
+    if lv not in LEVEL_ORDER:
+        lv = "standard"
+    return {
+        "edit": edit,
+        "view": view_of(session, lv),
+        "learned_delta": delta,
+        "levels": plan.get("levels", {}),
+        "warnings": (plan.get("provenance") or {}).get("edit_warnings", []),
+    }
+
+
+def apply_edit(session: str, op: dict[str, Any], *, user: str,
+               level: str | None = None) -> dict[str, Any]:
+    """編集を 1 件追記して plan を再構成する (CLI と同じ cc_core.editing 経由)。"""
+    edit = editing.append_edit(session, op, graphs_dir=GRAPHS_DIR, user=user)
+    return _after_edit(session, edit, level)
+
+
+def revert_edit(session: str, edit_id: str, *, user: str,
+                level: str | None = None) -> dict[str, Any]:
+    """編集を取り消す (取り消し行の追記 → 再構成)。"""
+    edit = editing.append_revert(session, edit_id, graphs_dir=GRAPHS_DIR, user=user)
+    return _after_edit(session, edit, level)
 
 
 # ------------------------------------------------------------------ 展開

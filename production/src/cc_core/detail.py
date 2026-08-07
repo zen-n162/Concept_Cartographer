@@ -16,7 +16,7 @@ Detailed は 100 ノード上限で Top-K 選抜が働くため無制限生成�
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import Any, Iterable
 
 from cc_core.community import (
     LEVEL_BANDS,
@@ -45,11 +45,15 @@ def _level_kg(
     nodes: list[dict[str, Any]] = []
     for nid in analysis.visible[level]:
         src = node_meta.get(nid, {})
-        nodes.append({
+        node: dict[str, Any] = {
             "id": nid,
             "label": src.get("label", nid),
             "community_id": analysis.communities.get(nid, "comm_000"),
-        })
+        }
+        # 出所 (編集/学習設計書 §2) は UI バッジと KPI の分母判定に要るので運ぶ
+        if src.get("origin"):
+            node["origin"] = src["origin"]
+        nodes.append(node)
 
     # 集約ノードを「メンバーがいたコミュニティ」に置く
     agg_ids: dict[str, str] = {}
@@ -99,7 +103,7 @@ def _level_kg(
             m.pop("member_edge_ids")
         # v4核§6.3 の属性を引き継ぐ (縮約時は代表エッジのもの)
         for attr in ("confidence", "evidence_span", "epistemic_status",
-                     "polarity", "provenance", "causal_check"):
+                     "polarity", "provenance", "causal_check", "origin"):
             if src.get(attr) is not None:
                 m[attr] = src[attr]
         edges.append(m)
@@ -135,6 +139,8 @@ def build_multilevel_plan(
     weights: dict[str, float] | None = None,
     community_names: dict[str, str] | None = None,
     language: str | None = None,
+    frozen_communities: dict[str, str] | None = None,
+    pinned: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """3 レベルを同梱した layout_plan を作る。
 
@@ -142,11 +148,15 @@ def build_multilevel_plan(
     `visible_at` でどのレベルに出るかを示す。overview/standard の座標は
     `plan["_levels_layout"]` ではなく `project()` で都度取り出す設計にすると
     切替のたびに再レイアウトが要るため、**各レベルの完成 plan を同梱**する。
+
+    frozen_communities / pinned は編集後の再構成用のパススルー
+    (編集/学習設計書 §4.3 / §4.1)。省略時は従来どおり Leiden を再実行する。
     """
     if default_level not in LEVEL_ORDER:
         raise ValueError(f"unknown detail level: {default_level}")
 
-    analysis = analyze(kg, weights=weights, community_names=community_names)
+    analysis = analyze(kg, weights=weights, community_names=community_names,
+                       frozen_communities=frozen_communities, pinned=pinned)
 
     level_plans: dict[str, dict[str, Any]] = {}
     level_stats: dict[str, dict[str, int]] = {}
@@ -176,6 +186,9 @@ def build_multilevel_plan(
             "edges": len(plan["edges"]),
             "aggregates": len(aggs),
         }
+        if analysis.pinned:
+            level_stats[level]["pinned"] = sum(
+                1 for n in analysis.visible[level] if n in analysis.pinned)
         for a in aggs:
             all_aggregates[a["id"]] = a
 
@@ -218,11 +231,18 @@ def project(plan: dict[str, Any], level: str) -> dict[str, Any]:
     return out
 
 
+PINNED_OVERFLOW_PREFIX = "user_pinned_overflow"
+
+
 def check_level_bands(plan: dict[str, Any]) -> list[str]:
     """各レベルのノード数が v3 §2.4 の帯に収まっているか検査する。
 
     元のグラフが小さくて帯の下限に届かない場合は違反としない
     (「10 概念しかない研究に 10-20 を強制する」のは無意味なため)。
+
+    ユーザーのピン留め (編集/学習設計書 §4.1) で上限を超えた場合は
+    `user_pinned_overflow:` 接頭辞を付けて**区別して**報告する。これは
+    仕様どおりの挙動であってレイアウトの不具合ではないため、エラーではない。
     """
     problems: list[str] = []
     levels = plan.get("levels", {})
@@ -233,8 +253,20 @@ def check_level_bands(plan: dict[str, Any]) -> list[str]:
             continue
         lo, hi = LEVEL_BANDS[level]
         n = stats["nodes"]
+        pinned = stats.get("pinned", 0)
         if n > hi:
-            problems.append(f"{level}: {n} ノードは上限 {hi} を超過")
+            if pinned:
+                problems.append(
+                    f"{PINNED_OVERFLOW_PREFIX}: {level}: {n} ノード (上限 {hi}) — "
+                    f"編集でピン留めした {pinned} 件を優先しました")
+            else:
+                problems.append(f"{level}: {n} ノードは上限 {hi} を超過")
         if n < lo and detailed_total > lo:
             problems.append(f"{level}: {n} ノードは下限 {lo} 未満 (全体 {detailed_total})")
     return problems
+
+
+def band_problems_are_pins_only(problems: list[str]) -> bool:
+    """帯の逸脱がピン留めによるものだけか (受け入れ判定に使う)。"""
+    return bool(problems) and all(
+        p.startswith(PINNED_OVERFLOW_PREFIX) for p in problems)

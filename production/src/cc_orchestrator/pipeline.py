@@ -22,6 +22,12 @@ from cc_core.causal import apply_relation_policy
 from cc_core.detail import build_multilevel_plan, check_level_bands, project
 from cc_core.evaluation import summarize
 from cc_core.gaps import detect_gaps
+from cc_core.learning import (
+    apply_learned,
+    build_prompt_hints,
+    load_learned,
+    note_cues_kept,
+)
 from cc_core.logging_util import get_logger
 from cc_core.mcp_client import extract_json
 from cc_core.normalize import normalize_kg
@@ -114,6 +120,7 @@ def run_pipeline(
     export_svg: bool = True,
     progress: ProgressFn | None = None,
     offline: bool = False,
+    learned: bool = True,
 ) -> dict[str, Any]:
     """概念地図生成の全経路。
 
@@ -121,6 +128,9 @@ def run_pipeline(
     offline:  Foundry を一切呼ばない実行モード (Web の再描画・テスト用)。
               保存済み KG から詳細度計算以降だけを回すため kg_file が必須。
               LLM 抽出も因果の独立検証も無いので、結果は語彙証拠のみに基づく。
+    learned:  過去の修正からの学習を適用するか (編集/学習設計書 §5.3)。
+              False で ①抽出ヒント ②自動適用 ③因果上書き のすべてを止める。
+              適用した場合は必ず summary["learned"] に内訳が出る (黙って直さない)。
     """
     if offline and not kg_file:
         raise ValueError("offline モードは kg_file が必須です (LLM 抽出を行わないため)")
@@ -155,6 +165,7 @@ def run_pipeline(
 
     # ---- ①② Ingest + Extraction ----
     _notify(progress, "ingest")
+    learned_store = load_learned() if learned else None
     if kg_file:
         kg, norm = normalize_kg(json.loads(Path(kg_file).read_text(encoding="utf-8")))
         summary["ingest"] = {"mode": "kg_file", "file": kg_file}
@@ -197,6 +208,14 @@ def run_pipeline(
             "検査するため)。文字位置が分かる場合のみ char_start / char_end を"
             "整数で 追加してください。分からなければ省略して構いません。\n"
         )
+        # フック 1: 過去の修正からの注意を抽出プロンプト末尾に足す (§5.3)。
+        # エージェント定義 (agents_def) は変えない — バージョンを増殖させず、
+        # 実行ごとに最新のヒントを使うため。
+        hints = build_prompt_hints(learned_store)
+        if hints:
+            prompt += hints
+            summary["learned_hints"] = hints.count("\n- ")
+
         if docs:
             prompt += f"\n=== 添付資料 ({len(docs)} 件) ===\n{bundle(docs)[:LOCAL_BUDGET]}"
         else:
@@ -221,23 +240,48 @@ def run_pipeline(
             summary["normalized"] = norm.to_dict()
             logger.info("kg normalized: %s", norm.repairs)
 
-        kg_path = Path("graphs") / f"kg_session_{session}.json"
-        kg_path.parent.mkdir(exist_ok=True)
-        kg_path.write_text(json.dumps(kg, ensure_ascii=False, indent=2), encoding="utf-8")
-        summary["knowledge_graph"] = {
-            "nodes": len(kg["nodes"]), "edges": len(kg.get("edges", [])),
-            "communities": len(kg.get("communities", [])),
-            "source_files": kg.get("source_files", []),
-            "saved": str(kg_path),
-        }
+    # ---- フック 2: 学習の自動適用 (§5.3) ----
+    # 改名辞書・除外リストを当て、因果上書きの印を付ける。**必ず内訳を返す**
+    # ので、何を機械が直したかは常に summary から追える (黙って直さない)。
+    kg, learned_report = apply_learned(kg, learned_store, enabled=bool(learned))
+    summary["learned"] = learned_report
 
     # ---- ④ Relate: 因果3点セット + 矛盾の非断定化 (裁定 7) ----
+    # フック 3: causal_override が付いた対は 3 点セットを走らせず確定させる
+    # (apply_relation_policy が edge["causal_override"] を見る)。
     # offline は独立検証器 (別モデル判定) を持てないため verifier=None。
     # 3 点セットの 3 点目が欠けるので、通る因果は語彙証拠のみの根拠になる。
     _notify(progress, "relate")
     verifier = _causal_verifier(client) if (verify_causal and client) else None
     kg, causal_stats = apply_relation_policy(kg, verifier=verifier)
     summary["relation_policy"] = causal_stats
+
+    # 因果として維持された語彙証拠を数える (§5.1 cue_stats)。R1 は記録のみで、
+    # 閾値を超えた語彙の扱いは人が判断する (§12)。
+    if learned:
+        try:
+            note_cues_kept([hit for e in kg.get("edges", [])
+                            if e.get("glyph") == "arrow"
+                            for hit in (e.get("causal_check") or {}).get("lexicon_hit", [])])
+        except OSError as exc:  # 統計が書けなくても生成は続ける
+            logger.warning("cue_stats not recorded: %s", type(exc).__name__)
+
+    # ---- 原本 KG の保存 (編集の base) ----
+    # **関係ポリシー適用後**を保存するのが要点。ここが利用者に見えている状態で
+    # あり、編集はこの上に積まれる。ポリシー適用**前**を base にすると、
+    # 1 か所の編集で rebuild したときに降格済みの相関が生の因果矢印へ戻り、
+    # 3 点セット (裁定 7) が黙って無効化されてしまう。
+    # kg_file 経由でもセッション固有の原本を残す — 原本が無いセッションは
+    # cc_core.editing が「原本 + 追記ログ」で再構成できず、編集できないため。
+    kg_path = Path("graphs") / f"kg_session_{session}.json"
+    kg_path.parent.mkdir(exist_ok=True)
+    kg_path.write_text(json.dumps(kg, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary["knowledge_graph"] = {
+        "nodes": len(kg["nodes"]), "edges": len(kg.get("edges", [])),
+        "communities": len(kg.get("communities", [])),
+        "source_files": kg.get("source_files", []),
+        "saved": str(kg_path),
+    }
 
     # ---- 可変詳細度: 3 レベル同梱を 1 回で生成 (§4) ----
     _notify(progress, "detail")
