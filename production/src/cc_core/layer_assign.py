@@ -12,8 +12,10 @@ R1.5 から凍結されている因果ポリシーの回帰面が広がる。**�
   (3) zone ラベル          -> layer_B (v4実§4.7 経路B: 新規 LLM 呼び出しなし)
   (4) L5 の関係候補        -> layer_A (is_a / part_of)。**新規エッジは作らない**
 
-§8 の (2) apply_relation_policy はパイプラインの ④relate が既に実行済み、
-(5) 検証結果の反映は M5/M6 の担当。
+§8 の (2) apply_relation_policy はパイプラインの ④relate が既に実行済み。
+(5) 検証結果の反映は `apply_validation` (⑤validate の結果 -> edge["validation"])
+と `stamp_refutes` (⑥rhetoric の refutes -> layer_D) がここで担当する —
+**層 D への刻印を causal.py から離して 1 か所に集める**ため。
 
 **(1) が要る理由**: 層タグが 1 つでも付くと ⑦meta の投影が走り、規則⑪ の
 既定 (wave) に落ちる。zone 由来の layer_B だけを刻むと、検証を通った因果の
@@ -23,7 +25,7 @@ R1.5 から凍結されている因果ポリシーの回帰面が広がる。**�
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from cc_core.editing import normalize_label
 from cc_core.layers import LAYER_KEYS, normalize_layer_tags
@@ -276,3 +278,182 @@ def assign_layer_tags(
 
     logger.info("layer tags assigned %s", stats)
     return stats
+
+
+# ------------------------------------------------------- §8(5) 検証結果の反映
+
+# ⑥rhetoric の verdict -> 層 D のタグ (§1: 矛盾は層 D でのみ扱う)。
+# "none" は何も刻まない (「調べたが矛盾しなかった」はサイドカーにだけ残す)。
+REFUTES_VERDICT_TO_TAG: dict[str, str] = {
+    "refutes": "refutes", "disagrees": "disagrees_with",
+}
+
+
+def apply_validation(
+    kg: dict[str, Any],
+    results: Mapping[str, dict[str, Any]],
+    *,
+    claims: Sequence[dict[str, Any]] = (),
+) -> dict[str, int]:
+    """⑤validate の結果を kg へ反映する (§8(5))。
+
+    2 つのことをする:
+
+      1. `edge["validation"]` を書く。⑦meta の投影 (規則④) が
+         `layers.corroborated` 経由でこれを読み、0.75 未満の causes 候補は
+         矢印にならず相関のまま残る — **エッジは消さない**。「検証を通らな
+         かった因果候補」は地図から消すより、相関として見えていたほうがよい
+      2. rejected になった主張への `claim_refs` を**外す**。サイドカーには
+         status=rejected として残すが (何を落としたかは追える)、地図の側から
+         参照が生きていると「登録された主張」と読めてしまうため
+
+    kg はその場で書き換える (assign_layer_tags と同じ流儀)。
+    """
+    stats = {"edges_validated": 0, "edges_rejected": 0, "refs_dropped": 0}
+    rejected = {str(c.get("nanopub_id") or "") for c in claims or ()
+                if isinstance(c, dict)
+                and (c.get("validation") or {}).get("status") == "rejected"}
+    rejected.discard("")
+
+    for edge in kg.get("edges", []) or ():
+        if not isinstance(edge, dict):
+            continue
+        validation = results.get(str(edge.get("id")))
+        if isinstance(validation, dict):
+            edge["validation"] = dict(validation)
+            stats["edges_validated"] += 1
+            if validation.get("status") == "rejected":
+                stats["edges_rejected"] += 1
+
+    if rejected:
+        for element in list(kg.get("edges", []) or ()) + list(kg.get("nodes", []) or ()):
+            if not isinstance(element, dict):
+                continue
+            refs = element.get("claim_refs")
+            if not isinstance(refs, (list, tuple)):
+                continue
+            kept = [r for r in refs if r not in rejected]
+            if len(kept) != len(refs):
+                stats["refs_dropped"] += len(refs) - len(kept)
+                if kept:
+                    element["claim_refs"] = kept
+                else:
+                    element.pop("claim_refs", None)
+
+    logger.info("validation applied %s", stats)
+    return stats
+
+
+def _refutes_targets(
+    edges: Sequence[dict[str, Any]],
+    labels: Mapping[str, str],
+    refs_a: str, refs_b: str,
+    concepts_a: set[str], concepts_b: set[str],
+) -> list[dict[str, Any]]:
+    """矛盾ペアが指している既存エッジを探す (**新規エッジは作らない**)。
+
+    対応と認める条件は 2 つだけ。どちらも決定的:
+
+      1. そのエッジの `claim_refs` に両方の nanopub_id が載っている
+         (assign_layer_tags が根拠文の一致で既に結び付けた対)
+      2. エッジの両端が 2 つの主張の概念に覆われ、かつ**共有概念を少なくとも
+         1 つ端に含む** — 「両方の主張が話題にしている関係」だけを拾う
+
+    2 を「和集合に含まれる」だけにすると、たまたま話題が近いだけの無関係な
+    エッジに ⚡ が点いてしまう。共有概念を端に要求して絞る。
+    """
+    shared = concepts_a & concepts_b
+    union = concepts_a | concepts_b
+    out: list[dict[str, Any]] = []
+    for edge in edges:
+        refs = edge.get("claim_refs")
+        refs = set(refs) if isinstance(refs, (list, tuple)) else set()
+        if {refs_a, refs_b} <= refs:
+            out.append(edge)
+            continue
+        ends = {labels.get(str(edge.get("from")), ""),
+                labels.get(str(edge.get("to")), "")}
+        if "" in ends:
+            continue
+        if ends <= union and ends & shared:
+            out.append(edge)
+    return out
+
+
+def stamp_refutes(
+    kg: dict[str, Any],
+    refutes: Sequence[Mapping[str, Any]] = (),
+    claims: Sequence[dict[str, Any]] = (),
+) -> dict[str, int]:
+    """⑥rhetoric の矛盾判定を layer_D へ刻む (§8(5) / 投影規則③)。
+
+    `refutes` が成立したエッジは ⑦meta の投影で **zigzag (⚡)** になる。
+    R1 では矛盾候補を tension (灰破線) へ降ろしていた (裁定 7) が、それは
+    「矛盾を判定する段が無い」ことの裏返しだった。⑥rhetoric が別モデルで
+    判定した対だけを、ここで初めて断定に上げる。
+
+    tension のエッジには **refutes のときだけ**刻む。disagrees_with を刻むと
+    層タグが付いたぶん投影が走り、非断定の灰破線が素の相関 (〜) に化けて
+    しまうため — 表示を弱めることはしない。hole (ギャップ候補) は関係では
+    ないので触らない。**対応するエッジが無ければ何もしない** (サイドカーに
+    記録は残る)。
+    """
+    stats = {"pairs": 0, "edges_stamped": 0, "unmatched": 0, "kept_tension": 0}
+    by_id = {str(c.get("nanopub_id") or ""): c for c in claims or ()
+             if isinstance(c, dict)}
+    edges = [e for e in kg.get("edges", []) or ()
+             if isinstance(e, dict) and str(e.get("glyph") or "") != "hole"]
+    labels = {str(n.get("id")): normalize_label(n.get("label"))
+              for n in kg.get("nodes", []) or () if isinstance(n, dict)}
+
+    def concepts_of(nanopub: str) -> set[str]:
+        claim = by_id.get(nanopub) or {}
+        assertion = claim.get("assertion") or {}
+        return {normalize_label(c) for c in assertion.get("related_concepts") or ()}
+
+    for record in refutes or ():
+        if not isinstance(record, Mapping):
+            continue
+        tag = REFUTES_VERDICT_TO_TAG.get(str(record.get("verdict") or ""))
+        pair = record.get("pair")
+        if not tag or not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        stats["pairs"] += 1
+        a, b = str(pair[0]), str(pair[1])
+        targets = _refutes_targets(edges, labels, a, b,
+                                   concepts_of(a), concepts_of(b))
+        if not targets:
+            stats["unmatched"] += 1
+            continue
+        for edge in targets:
+            if tag != "refutes" and str(edge.get("glyph") or "") in UNTAGGED_GLYPHS:
+                stats["kept_tension"] += 1     # 非断定の表示を弱めない
+                continue
+            if _merge_tags(edge, {"layer_D": [tag]}):
+                stats["edges_stamped"] += 1
+            if tag == "refutes":
+                _clear_contradiction_demotion(edge, stats)
+
+    logger.info("refutes stamped %s", stats)
+    return stats
+
+
+def _clear_contradiction_demotion(edge: dict[str, Any],
+                                  stats: dict[str, int]) -> None:
+    """R1 の「矛盾は非断定へ降格」の記録を、断定に戻したときに畳む。
+
+    ④relate は矛盾候補を tension へ落として `causal_check` に
+    `demoted_from: "zigzag"` と「矛盾判定は L8 (R2) で行う」という理由を残す
+    (裁定 7)。⑥rhetoric はまさにその L8 に当たる段なので、判定が付いた後も
+    その記録を残すと、⚡ が点いているエッジのクリック展開に「R1 では候補として
+    非断定表示」と出て食い違う。**現在の判定を書く**方へ寄せる。
+
+    `demoted_from: "arrow"` (因果の降格) には触らない — evaluation の
+    causal_precision_log が数えている KPI の連続性に関わるため。
+    """
+    check = edge.get("causal_check")
+    if not isinstance(check, dict) or check.get("demoted_from") != "zigzag":
+        return
+    check.pop("demoted_from", None)
+    check["reason"] = "⑥rhetoric が別モデルで矛盾と判定したため断定に戻した"
+    stats["restored_from_tension"] = stats.get("restored_from_tension", 0) + 1

@@ -16,7 +16,9 @@
   var STAGES = [
     ["routing", "経路判定"], ["ingest", "資料収集"], ["extract", "概念抽出"],
     ["zone", "文脈ラベル付け"], ["claims", "主張の抽出"],
-    ["relate", "関係の検証"], ["detail", "詳細度の計算"], ["gaps", "ギャップ検出"],
+    ["relate", "関係の検証"], ["validate", "主張の検証"],
+    ["rhetoric", "論証と矛盾の検出"],
+    ["detail", "詳細度の計算"], ["gaps", "ギャップ検出"],
     ["render", "描画"], ["verify", "独立検証"], ["export", "出力"]
   ];
   // 関係記号の表示名。cc_core.normalize.VALID_GLYPHS と 1:1 で対応させること

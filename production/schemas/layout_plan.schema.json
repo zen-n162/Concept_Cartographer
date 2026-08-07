@@ -333,6 +333,36 @@
               }
             }
           },
+          "validation": {
+            "type": "object",
+            "description": "⑤validate の 3 検証器合成の記録 (R2a 設計書 §7)",
+            "additionalProperties": true,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "validated",
+                  "uncertain",
+                  "rejected"
+                ]
+              },
+              "combined": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "scores": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "requires_human_review": {
+                "type": "boolean"
+              }
+            }
+          },
           "causal_check": {
             "type": "object",
             "description": "因果3点セット検証の記録 (計画 裁定7)",

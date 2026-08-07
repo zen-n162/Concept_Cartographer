@@ -37,7 +37,7 @@ AGGREGATE_STYLE = {"rough": True, "backgroundColor": "#e7f5ff", "strokeColor": "
 NODE_CARRY: tuple[str, ...] = ("origin", "onto_class", "claim_refs")
 EDGE_CARRY: tuple[str, ...] = ("confidence", "evidence_span", "epistemic_status",
                                "polarity", "provenance", "causal_check", "origin",
-                               "layer_tags", "claim_refs")
+                               "layer_tags", "claim_refs", "validation")
 
 
 def _level_kg(

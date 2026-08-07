@@ -16,6 +16,9 @@ normalize.py と同じ思想で、LLM 出力は指示どおりの形で返ると
   CC_CLAIMS_MAX          主張の件数上限                 (既定 40)
   CC_CLAIMS_BATCH        claims 1 call あたりの文数     (既定 60)
   CC_CLAIMS_MAX_CALLS    claims の call 数上限          (既定 3)
+  CC_CGW_BATCH           cgw 1 call あたりの主張数      (既定 20)
+  CC_CGW_MAX_CALLS       cgw の call 数上限             (既定 2)
+  CC_REFUTES_MAX_PAIRS   矛盾を問う候補ペアの上限       (既定 30)
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import datetime as dt
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from cc_core import layers_store
 from cc_core.editing import normalize_label
@@ -538,6 +541,345 @@ def run_claims(
     logger.info("claims done targets=%d claims=%d relations=%d",
                 len(targets), len(claims), len(ontology["relations"]))
     return claims, ontology
+
+
+# ------------------------------------------------------------------ cgw (§6)
+
+
+def cgw_batch() -> int:
+    return _knob("CC_CGW_BATCH", 20)
+
+
+def cgw_max_calls() -> int:
+    return _knob("CC_CGW_MAX_CALLS", 2)
+
+
+def refutes_max_pairs() -> int:
+    return _knob("CC_REFUTES_MAX_PAIRS", 30)
+
+
+# epistemic_strength の重み (§6)。**決定的コード**で算出する — 論証の強さを
+# LLM に自己申告させると、根拠が薄い主張ほど自信ありげに返ってくるため。
+GROUNDS_TARGET = 3
+STRENGTH_LEVELS: tuple[tuple[float, str], ...] = (
+    (0.75, "strong"), (0.5, "moderate"), (0.3, "weak"),
+)
+DEFAULT_LEVEL = "speculative"
+MAX_WARRANT_CHARS = 200
+NEIGHBOUR_WINDOW = 1
+
+
+def epistemic_strength(grounds: Sequence[Mapping[str, Any]],
+                       warrant: str) -> dict[str, Any]:
+    """論証の強さ (§6)。0.4·根拠の数 + 0.4·根拠の確信 + 0.2·warrant の有無。
+
+    「根拠が 3 本あれば数としては十分」と置いて頭打ちにする。数だけ多くても
+    確信度が低ければ moderate 止まりになるよう、2 つを同じ重みにしてある。
+    """
+    count = min(1.0, len(grounds) / GROUNDS_TARGET) if grounds else 0.0
+    mean = (sum(_as_confidence(g.get("confidence")) for g in grounds) / len(grounds)
+            if grounds else 0.0)
+    score = round(0.4 * count + 0.4 * mean + 0.2 * (1.0 if warrant.strip() else 0.0), 4)
+    level = next((name for threshold, name in STRENGTH_LEVELS if score >= threshold),
+                 DEFAULT_LEVEL)
+    return {"score": score, "level": level}
+
+
+def validated_claims(claims: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """⑤validate を通った主張だけ (§6 の cgw は validated のみ対象)。
+
+    検証していない主張に論証を組み立てさせると、根拠の薄い主張ほど立派な
+    warrant が付いて見え、地図の読み手を誤らせる。
+    """
+    return [c for c in claims or ()
+            if isinstance(c, Mapping)
+            and (c.get("validation") or {}).get("status") == "validated"]
+
+
+def _neighbour_sentences(
+    zones: Sequence[Mapping[str, Any]],
+    claims: Sequence[Mapping[str, Any]],
+    *, window: int = NEIGHBOUR_WINDOW,
+) -> list[dict[str, str]]:
+    """主張の根拠文とその前後を集める (§6 の cgw 入力「近傍文」)。
+
+    根拠文そのものだけだと「その文が主張と同じことを言っている」という自明な
+    論証しか出てこない。前後 1 文を足して、裏付けを探せる幅を持たせる。
+    """
+    order = [z for z in zones or () if isinstance(z, Mapping) and z.get("sentence_id")]
+    position = {str(z["sentence_id"]): i for i, z in enumerate(order)}
+    wanted: set[int] = set()
+    for claim in claims or ():
+        for sid in (claim.get("provenance") or {}).get("source_span") or ():
+            idx = position.get(str(sid))
+            if idx is None:
+                continue
+            for j in range(max(0, idx - window), min(len(order), idx + window + 1)):
+                wanted.add(j)
+    return [{"sentence_id": str(order[i]["sentence_id"]),
+             "text": str(order[i].get("text") or "")} for i in sorted(wanted)]
+
+
+def repair_arguments(
+    raw: Any,
+    claims: Sequence[Mapping[str, Any]],
+    sentences: Sequence[Mapping[str, str]],
+    report: AnalysisReport,
+) -> list[dict[str, Any]]:
+    """cgw task の出力を §3.2 の arguments レコードへ修復する。
+
+    - claim_id は入力にあるものだけ。1 主張 1 論証 (重複は捨てる)
+    - grounds の span_ref は入力の文だけ。text は**入力から引き直す**
+      (原文の同一性を LLM に委ねない — repair_zone_labels と同じ)
+    - epistemic_strength は LLM の申告を使わず、こちらで計算し直す
+    """
+    known_sentences = {s["sentence_id"]: s["text"] for s in sentences}
+    by_claim_id = {str((c.get("assertion") or {}).get("claim_id") or ""): c
+                   for c in claims}
+    by_claim_id.pop("", None)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for item in _as_list(raw, "arguments", "results"):
+        if not isinstance(item, dict):
+            report.note("cgw: 未知の要素を破棄")
+            continue
+        claim_id = str(item.get("claim_id") or "")
+        claim = by_claim_id.get(claim_id)
+        if claim is None:
+            report.note("cgw: 入力に無い claim_id を破棄")
+            continue
+        if claim_id in seen:
+            report.note("cgw: 同じ主張への重複した論証を破棄")
+            continue
+        grounds: list[dict[str, Any]] = []
+        for ground in _as_list(item.get("grounds"), "grounds"):
+            if not isinstance(ground, dict):
+                continue
+            span_ref = str(ground.get("span_ref") or "")
+            if span_ref not in known_sentences:
+                report.note("cgw: 入力に無い span_ref を破棄")
+                continue
+            if any(g["span_ref"] == span_ref for g in grounds):
+                continue
+            grounds.append({"span_ref": span_ref, "text": known_sentences[span_ref],
+                            "confidence": _as_confidence(ground.get("confidence"))})
+        warrant = str(item.get("warrant") or "").strip()[:MAX_WARRANT_CHARS]
+        seen.add(claim_id)
+        out.append({
+            "argument_id": f"arg-{len(out) + 1:03d}",
+            "claim_ref": str(claim.get("nanopub_id") or ""),
+            "grounds": grounds,
+            "warrant": warrant,
+            "epistemic_strength": epistemic_strength(grounds, warrant),
+        })
+    return out
+
+
+def run_cgw(
+    run: RunFn,
+    claims: Sequence[Mapping[str, Any]],
+    zones: Sequence[Mapping[str, Any]],
+    *,
+    report: AnalysisReport,
+) -> list[dict[str, Any]]:
+    """論証の抽出 (§6 の task: cgw)。**validated な主張だけ**を対象にする。"""
+    targets = validated_claims(claims)
+    if not targets:
+        report.notes.append("論証の対象になる validated な主張が無い")
+        return []
+    sentences = _neighbour_sentences(zones, targets)
+    if not sentences:
+        report.notes.append("論証の材料になる近傍文が無い (zones が空)")
+        return []
+
+    arguments: list[dict[str, Any]] = []
+    max_calls = cgw_max_calls()
+    for call_no, batch in enumerate(_batched(targets, cgw_batch())):
+        if call_no >= max_calls:
+            report.notes.append(
+                f"cgw の call 上限 {max_calls} に達したため残りの主張は対象外")
+            break
+        payload = _payload(
+            "cgw",
+            claims=[{"claim_id": (c.get("assertion") or {}).get("claim_id", ""),
+                     "claim_text": (c.get("assertion") or {}).get("claim_text", "")}
+                    for c in batch],
+            sentences=sentences)
+        try:
+            raw = extract_json(run(payload))
+            report.llm_calls += 1
+        except Exception as exc:
+            report.errors.append(f"cgw: {type(exc).__name__}")
+            logger.warning("cgw batch failed: %s", type(exc).__name__)
+            continue
+        for argument in repair_arguments(raw, batch, sentences, report):
+            argument["argument_id"] = f"arg-{len(arguments) + 1:03d}"
+            arguments.append(argument)
+    logger.info("cgw done validated=%d arguments=%d", len(targets), len(arguments))
+    return arguments
+
+
+# ------------------------------------------------------------------ refutes (§6)
+
+# 候補ペアの決定的な絞り込みに使う手がかり (§6: ここは LLM を使わない)。
+# 「主張の極性」を粗く読むためだけのもので、判定そのものは LLM が行う。
+NEGATION_CUES: tuple[str, ...] = (
+    "ない", "なかった", "ません", "でない", "否定", "不可", "困難",
+    "見られなかった", "認められなかった", "有意差はな", "変わらな",
+    " not ", "n't", " no ", "fail", "without", "lack", "absence", "unable",
+)
+# 対になる語。片方ずつを別の主張が含んでいれば対立の候補とみなす
+OPPOSITE_CUE_PAIRS: tuple[tuple[str, str], ...] = (
+    ("増加", "減少"), ("上昇", "低下"), ("向上", "低下"), ("改善", "悪化"),
+    ("促進", "抑制"), ("有効", "無効"), ("正の相関", "負の相関"),
+    ("多い", "少ない"), ("高い", "低い"), ("速い", "遅い"),
+    ("increase", "decrease"), ("improve", "worsen"), ("higher", "lower"),
+    ("effective", "ineffective"), ("positive", "negative"),
+)
+
+VERDICTS: tuple[str, ...] = ("refutes", "disagrees", "none")
+
+
+def claim_polarity(text: str) -> str:
+    """主張の粗い極性 (§3.1 の 3 値と同じ語彙)。否定の手がかり語だけで決める。"""
+    lowered = f" {str(text or '').lower()} "
+    return "negative" if any(cue.lower() in lowered
+                             for cue in NEGATION_CUES) else "positive"
+
+
+def _opposite_cue_split(a: str, b: str) -> bool:
+    """対になる語が 2 つの主張に分かれて出ているか。"""
+    low_a, low_b = a.lower(), b.lower()
+    for left, right in OPPOSITE_CUE_PAIRS:
+        if (left in low_a and right in low_b) or (right in low_a and left in low_b):
+            return True
+    return False
+
+
+def refutes_candidates(
+    claims: Sequence[Mapping[str, Any]],
+    *,
+    limit: int | None = None,
+    report: AnalysisReport | None = None,
+) -> list[tuple[Mapping[str, Any], Mapping[str, Any]]]:
+    """矛盾を問う候補ペアを**決定的に**絞り込む (§6)。
+
+    全組み合わせを LLM に投げると n² で費用が爆発するうえ、無関係な対にも
+    もっともらしい矛盾を作られる。条件は 2 つ:
+
+      1. related_concepts を 1 つ以上共有する (同じものについて語っている)
+      2. 極性が反転している、または対になる語 (増加↔減少 等) が分かれている
+
+    rejected な主張は対象外 — 登録しないものの矛盾を数えても意味がない。
+    順序は claims の順で決まるので、同じ入力なら同じペアが出る。
+    """
+    usable = [c for c in claims or ()
+              if isinstance(c, Mapping)
+              and (c.get("validation") or {}).get("status") != "rejected"]
+    cap = limit if limit is not None else refutes_max_pairs()
+    texts = [str((c.get("assertion") or {}).get("claim_text") or "") for c in usable]
+    concepts = [{normalize_label(x)
+                 for x in (c.get("assertion") or {}).get("related_concepts") or ()}
+                for c in usable]
+    polarity = [claim_polarity(t) for t in texts]
+
+    pairs: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    truncated = 0
+    for i in range(len(usable)):
+        for j in range(i + 1, len(usable)):
+            if not (concepts[i] & concepts[j]):
+                continue
+            if not (polarity[i] != polarity[j]
+                    or _opposite_cue_split(texts[i], texts[j])):
+                continue
+            if len(pairs) >= cap:
+                truncated += 1
+                continue
+            pairs.append((usable[i], usable[j]))
+    if truncated and report is not None:
+        report.notes.append(
+            f"矛盾の候補ペアが上限 {cap} を超えたため {truncated} 組を対象外にした "
+            "(CC_REFUTES_MAX_PAIRS)")
+    return pairs
+
+
+def repair_refutes(
+    raw: Any,
+    pairs: Sequence[tuple[Mapping[str, Any], Mapping[str, Any]]],
+    report: AnalysisReport,
+) -> list[dict[str, Any]]:
+    """refutes task の出力を §3.2 の refutes レコードへ修復する。
+
+    LLM には「pairs と同じ順序・同じ個数で返す」と指示してあるが、実際には
+    ずれることがある。**個数が合わない返答は丸ごと捨てる** — 順序に依存した
+    突合で 1 つずれると、無関係な対に矛盾の判定が付いてしまうため。
+    """
+    results = _as_list(raw, "results", "refutes")
+    if len(results) != len(pairs):
+        report.note("refutes: pairs と個数が合わない応答を破棄")
+        return []
+    out: list[dict[str, Any]] = []
+    for (a, b), item in zip(pairs, results):
+        if not isinstance(item, dict):
+            report.note("refutes: 未知の要素を破棄")
+            continue
+        verdict = str(item.get("verdict") or "").strip().lower()
+        if verdict not in VERDICTS:
+            report.note(f"refutes: 未知の verdict '{item.get('verdict')}' を none へ")
+            verdict = "none"
+        out.append({"pair": [str(a.get("nanopub_id") or ""),
+                             str(b.get("nanopub_id") or "")],
+                    "verdict": verdict,
+                    "confidence": _as_confidence(item.get("confidence")),
+                    "rationale": str(item.get("rationale") or "").strip()[:120]})
+    return out
+
+
+def run_refutes(
+    run: RunFn,
+    claims: Sequence[Mapping[str, Any]],
+    *,
+    report: AnalysisReport,
+) -> list[dict[str, Any]]:
+    """内部矛盾の検出 (§6 の task: refutes)。候補ペアの絞り込みは決定的。"""
+    pairs = refutes_candidates(claims, report=report)
+    if not pairs:
+        report.notes.append("矛盾の候補ペアが無い (概念の共有と極性の反転がそろわない)")
+        return []
+    payload = _payload("refutes", pairs=[
+        {"a": str((a.get("assertion") or {}).get("claim_text") or ""),
+         "b": str((b.get("assertion") or {}).get("claim_text") or "")}
+        for a, b in pairs])
+    try:
+        raw = extract_json(run(payload))
+        report.llm_calls += 1
+    except Exception as exc:
+        report.errors.append(f"refutes: {type(exc).__name__}")
+        logger.warning("refutes call failed: %s", type(exc).__name__)
+        return []
+    records = repair_refutes(raw, pairs, report)
+    logger.info("refutes done pairs=%d judged=%d confirmed=%d", len(pairs),
+                len(records), sum(1 for r in records if r["verdict"] == "refutes"))
+    return records
+
+
+def analyze_rhetoric(
+    run: RunFn,
+    *,
+    claims: Sequence[Mapping[str, Any]],
+    zones: Sequence[Mapping[str, Any]] = (),
+    report: AnalysisReport | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], AnalysisReport]:
+    """⑥rhetoric — 論証 (cgw) と内部矛盾 (refutes) をまとめて回す (§6)。
+
+    LLM 呼び出しは最大 3 (cgw 2 + refutes 1)。どちらかが失敗しても他方は
+    続ける — 論証が取れなくても矛盾の検出には意味があるため。
+    """
+    report = report or AnalysisReport()
+    arguments = run_cgw(run, claims, zones, report=report)
+    refutes = run_refutes(run, claims, report=report)
+    return arguments, refutes, report
 
 
 # ------------------------------------------------------------------ 入口

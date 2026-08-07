@@ -147,9 +147,20 @@ def nanopub_id(claim_text: str, source_span: Iterable[str]) -> str:
 
 def compute_stats(doc: dict[str, Any], *, sentences: int = 0,
                   llm_calls: int = 0) -> dict[str, int]:
-    """§3.2 の stats を数える。validated は M5 の検証段が入るまで 0。"""
+    """§3.2 の stats を数える。検証段 (M5) / 論証段 (M6) が走る前は 0。
+
+    `rejected` / `arguments` / `refutes` は §3.2 の表に無い追加キー。
+    CLI の `--layers-summary` と Web の結果カードが「主張 n 件 (検証済 m)・
+    矛盾 k 件」を出すのに要る数で、サイドカーを読み直さずに済ませるため。
+    """
     claims = [c for c in doc.get("claims", []) if isinstance(c, dict)]
-    validated = sum(1 for c in claims
-                    if (c.get("validation") or {}).get("status") == "validated")
+    statuses = [(c.get("validation") or {}).get("status") for c in claims]
+    refutes = [r for r in doc.get("refutes", []) if isinstance(r, dict)]
     return {"sentences": sentences, "zoned": len(doc.get("zones", [])),
-            "claims": len(claims), "validated": validated, "llm_calls": llm_calls}
+            "claims": len(claims),
+            "validated": sum(1 for s in statuses if s == "validated"),
+            "rejected": sum(1 for s in statuses if s == "rejected"),
+            "arguments": len([a for a in doc.get("arguments", [])
+                              if isinstance(a, dict)]),
+            "refutes": sum(1 for r in refutes if r.get("verdict") == "refutes"),
+            "llm_calls": llm_calls}

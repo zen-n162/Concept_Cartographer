@@ -284,7 +284,8 @@ def test_layers_store_round_trip(tmp_path) -> None:
     assert loaded["version"] == 1 and loaded["splitter"] == SPLITTER_VERSION
     assert loaded["zones"][0]["zone_label"] == "Result"
     assert loaded["stats"] == {"sentences": 1, "zoned": 1, "claims": 0,
-                               "validated": 0, "llm_calls": 1}
+                               "validated": 0, "rejected": 0, "arguments": 0,
+                               "refutes": 0, "llm_calls": 1}
     # 空でも §3.2 のキーは全部ある (読む側が .get で場合分けしなくて済む)
     assert set(layers_store.DOCUMENT_KEYS) <= set(loaded)
 
@@ -604,37 +605,101 @@ def test_assignment_is_idempotent() -> None:
 
 
 class FakeAnalysisAgent:
-    """cc-analysis の代わり。task ごとに決め打ちの JSON を返す。"""
+    """cc-analysis の代わり。task ごとに決め打ちの JSON を返す。
 
-    def __init__(self, relations: list[dict] | None = None) -> None:
+    claims は既定で 1 件。`claims=[…]` を渡すと差し替えられる (M6 の矛盾判定は
+    2 件以上ないと候補ペアが作れないため)。
+    """
+
+    def __init__(self, relations: list[dict] | None = None,
+                 claims: list[dict] | None = None,
+                 refutes_verdict: str = "refutes") -> None:
         self.relations = relations or []
+        self.claims = claims
+        self.refutes_verdict = refutes_verdict
         self.tasks: list[str] = []
+
+    def _default_claims(self, payload: dict) -> list[dict]:
+        first = payload["sentences"][0]
+        return [{"claim_text": "概念地図は研究の見通しを改善する",
+                 "is_underspecified": False,
+                 "source_sentence_ids": [first["sentence_id"]],
+                 "related_concepts": payload["concepts"][:2]}]
 
     def __call__(self, prompt: str) -> str:
         payload = json.loads(prompt[prompt.index("{"):])
-        self.tasks.append(payload["task"])
-        if payload["task"] == "zone":
+        task = payload["task"]
+        self.tasks.append(task)
+        if task == "zone":
             return json.dumps({"labels": [
                 {"sentence_id": s["sentence_id"], "zone_label": "Result",
                  "zone_system": "CoreSC", "confidence": 0.86}
                 for s in payload["sentences"]]}, ensure_ascii=False)
-        first = payload["sentences"][0]
+        if task == "cgw":
+            grounds = [{"span_ref": s["sentence_id"], "text": s["text"],
+                        "confidence": 0.8} for s in payload["sentences"][:2]]
+            return json.dumps({"arguments": [
+                {"claim_id": c["claim_id"], "grounds": grounds,
+                 "warrant": "根拠の観察が主張の条件を満たす"}
+                for c in payload["claims"]]}, ensure_ascii=False)
+        if task == "refutes":
+            return json.dumps({"results": [
+                {"verdict": self.refutes_verdict, "confidence": 0.9,
+                 "rationale": "同じ対象について逆の結論"}
+                for _ in payload["pairs"]]}, ensure_ascii=False)
+        claims = self.claims
+        if claims is None:
+            claims = self._default_claims(payload)
+        else:                       # source_sentence_ids は実在の文へ差し替える
+            sids = [s["sentence_id"] for s in payload["sentences"]]
+            claims = [{**c, "source_sentence_ids": [sids[i % len(sids)]]}
+                      for i, c in enumerate(claims)]
         return json.dumps({
-            "claims": [{"claim_text": "概念地図は研究の見通しを改善する",
-                        "is_underspecified": False,
-                        "source_sentence_ids": [first["sentence_id"]],
-                        "related_concepts": payload["concepts"][:2]}],
+            "claims": claims,
             "concepts": [{"label": payload["concepts"][0],
                           "onto_class": "InformationEntity"}],
             "relations": self.relations,
         }, ensure_ascii=False)
 
 
+class FakeVerificationAgent:
+    """cc-verification の代わり。R2a の 3 検証器 (§7) と描画検証を見分ける。
+
+    プロンプトの冒頭で用途を判別する — 1 体のエージェントに複数の役を
+    持たせている実装 (§7 の NLI と独立 LLM は同じ terra) の写しになっている。
+    """
+
+    def __init__(self, *, label: str = "entails", score: float = 0.9,
+                 supported: bool = True, confidence: float = 0.9) -> None:
+        self.label, self.score = label, score
+        self.supported, self.confidence = supported, confidence
+        self.kinds: list[str] = []
+
+    def __call__(self, prompt: str) -> str:
+        if prompt.startswith("前提と仮説の含意関係"):
+            self.kinds.append("nli")
+            return json.dumps({"label": self.label, "score": self.score,
+                               "rationale": "前提に明示"}, ensure_ascii=False)
+        if prompt.startswith("次の主張が根拠テキストに支持されるか"):
+            self.kinds.append("llm")
+            return json.dumps({"supported": self.supported, "why": "原文に明示",
+                               "confidence": self.confidence}, ensure_ascii=False)
+        if prompt.startswith("次の関係が"):
+            self.kinds.append("causal")
+            return json.dumps({"causal": True, "why": "機序の記述あり"},
+                              ensure_ascii=False)
+        self.kinds.append("scene")
+        return json.dumps({"verdict": "PASS", "summary": "一致"},
+                          ensure_ascii=False)
+
+
 class FakeFoundry:
     """FoundryAgentsV2 の代わり (ネットワークに出ない)。"""
 
-    def __init__(self, analysis_agent: FakeAnalysisAgent) -> None:
+    def __init__(self, analysis_agent: FakeAnalysisAgent,
+                 verification: FakeVerificationAgent | None = None) -> None:
         self.analysis_agent = analysis_agent
+        self.verification = verification or FakeVerificationAgent()
         self.ensured: list[str] = []
 
     def ensure_agent(self, name: str, *args: object, **kwargs: object) -> str:
@@ -648,7 +713,7 @@ class FakeFoundry:
         if agent == "cc-projection":
             return json.dumps({"status": "RENDER_OK", "created": 42})
         if agent == "cc-verification":
-            return json.dumps({"verdict": "PASS", "summary": "一致"})
+            return self.verification(prompt)
         raise AssertionError(f"予期しないエージェント呼び出し: {agent}")
 
 
@@ -673,8 +738,9 @@ def mock_run(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from cc_orchestrator import pipeline
 
-    def _run(agent: FakeAnalysisAgent, **extra):
-        client = FakeFoundry(agent)
+    def _run(agent: FakeAnalysisAgent,
+             verification: FakeVerificationAgent | None = None, **extra):
+        client = FakeFoundry(agent, verification)
         monkeypatch.setattr(pipeline, "FoundryAgentsV2", lambda *a, **k: client)
         monkeypatch.setattr(pipeline, "ToolExecutor", FakeExecutor)
         stages: list[str] = []
@@ -701,7 +767,7 @@ def test_mock_e2e_writes_a_sidecar_in_the_designed_shape(mock_run) -> None:
     doc = json.loads(Path(summary["layers"]["saved"]).read_text(encoding="utf-8"))
     assert list(doc)[:3] == ["version", "session", "splitter"]
     assert doc["version"] == 1 and doc["splitter"] == SPLITTER_VERSION
-    assert doc["arguments"] == [] and doc["refutes"] == []      # M6 が埋める
+    assert isinstance(doc["arguments"], list) and isinstance(doc["refutes"], list)
 
     zone = doc["zones"][0]
     assert set(zone) == {"sentence_id", "text", "zone_label", "zone_system",
@@ -709,7 +775,8 @@ def test_mock_e2e_writes_a_sidecar_in_the_designed_shape(mock_run) -> None:
     assert zone["zone_label"] == "Result" and 0.0 <= zone["confidence"] <= 1.0
 
     claim = doc["claims"][0]
-    assert set(claim) == {"nanopub_id", "assertion", "provenance", "pub_info"}
+    assert set(claim) == {"nanopub_id", "assertion", "provenance", "pub_info",
+                          "validation"}      # validation は ⑤validate (M5) が足す
     assert claim["nanopub_id"].startswith("np:")
     assert set(claim["assertion"]) == {"claim_id", "claim_text",
                                        "is_underspecified", "related_concepts"}

@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from cc_core import layers_store
+from cc_core import layer_assign, layers_store, verifiers
 from cc_core.causal import apply_relation_policy
 from cc_core.detail import build_multilevel_plan, check_level_bands, project
 from cc_core.evaluation import summarize
@@ -59,6 +59,8 @@ STAGES: tuple[tuple[str, str], ...] = (
     ("zone", "文脈ラベル付け"),
     ("claims", "主張の抽出"),
     ("relate", "関係の検証"),
+    ("validate", "主張の検証"),
+    ("rhetoric", "論証と矛盾の検出"),
     ("detail", "詳細度の計算"),
     ("gaps", "ギャップ検出"),
     ("render", "描画"),
@@ -184,6 +186,82 @@ def _layers_stage(
     return doc, info
 
 
+def _validation_stages(
+    client: FoundryAgentsV2 | None,
+    *,
+    session: str,
+    kg: dict[str, Any],
+    layers_doc: dict[str, Any] | None,
+    offline: bool,
+    progress: ProgressFn | None,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """R2a の ⑤validate と ⑥rhetoric (設計書 §7/§6/§8(5))。
+
+    戻り値は (summary["validation"], summary["rhetoric"], 走った検証器の ID)。
+    status の語彙は _layers_stage と揃える:
+
+      done            3 検証器を走らせた / 論証と矛盾を判定した
+      skipped_offline offline (LLM を呼べない) — 再利用したサイドカーの
+                      検証結果はそのまま残る
+      disabled        layers=False、または層が作れなかった run
+
+    **層を作らない run でも進捗は必ず発火**させる (_layers_stage と同じ理由)。
+    layers_doc はその場で書き換わる (claims に validation、arguments/refutes
+    を足す)。保存は呼び出し側がまとめて 1 回行う。
+    """
+    _notify(progress, "validate")
+    _notify(progress, "rhetoric")
+    if layers_doc is None:
+        return {"status": "disabled"}, {"status": "disabled"}, []
+    if offline or client is None:
+        reason = "offline 実行では検証器 (別モデル) を呼べない"
+        return ({"status": "skipped_offline", "reason": reason},
+                {"status": "skipped_offline", "reason": reason}, [])
+
+    run = lambda prompt: client.run("cc-verification", prompt)   # noqa: E731
+    notes: list[str] = []
+    model = MODELS["verification"]
+    nli = verifiers.make_nli_verifier(run, model=model, notes=notes)
+    checker = verifiers.OntologyChecker(
+        (layers_doc.get("ontology") or {}).get("relations") or ())
+
+    # ---- ⑤validate: 主張全件 + causes 候補エッジ (§7) ----
+    edge_results, report = verifiers.run_validation(
+        kg, layers_doc.get("claims") or [],
+        zones=layers_doc.get("zones") or (), nli=nli,
+        llm=verifiers.LLMClaimVerifier(run, model=model),
+        ontology=checker, session=session)
+    report.notes.extend(notes)
+    validation_info: dict[str, Any] = {"status": "done"}
+    validation_info.update(report.to_dict())
+    validation_info["applied"] = layer_assign.apply_validation(
+        kg, edge_results, claims=layers_doc.get("claims") or ())
+
+    # ---- ⑥rhetoric: 論証と内部矛盾 (§6) ----
+    arguments, refutes, rhetoric_report = analysis.analyze_rhetoric(
+        lambda prompt: client.run(analysis.AGENT, prompt),
+        claims=layers_doc.get("claims") or [],
+        zones=layers_doc.get("zones") or ())
+    layers_doc["arguments"] = arguments
+    layers_doc["refutes"] = refutes
+    rhetoric_info: dict[str, Any] = {"status": "done"}
+    rhetoric_info.update(rhetoric_report.to_dict())
+    # sentence_source は ①文分割 の記録。⑥rhetoric の summary では意味がない
+    rhetoric_info.pop("sentence_source", None)
+    # 矛盾の刻印は layer_assign 側で行う (層 D の刻印を 1 か所に集める)。
+    # 対応するエッジが無ければサイドカーの記録だけが残る (エッジは作らない)。
+    rhetoric_info["stamped"] = layer_assign.stamp_refutes(
+        kg, refutes, layers_doc.get("claims") or ())
+
+    # 検証段ぶんの LLM 呼び出しを stats へ積む (受け入れ基準 5 の実測値)
+    stats = dict(layers_doc.get("stats") or {})
+    layers_doc["stats"] = layers_store.compute_stats(
+        layers_doc, sentences=int(stats.get("sentences") or 0),
+        llm_calls=int(stats.get("llm_calls") or 0)
+        + report.llm_calls + rhetoric_report.llm_calls)
+    return validation_info, rhetoric_info, list(report.verifier_ids)
+
+
 def run_pipeline(
     message: str,
     *,
@@ -211,8 +289,9 @@ def run_pipeline(
     layers:   R2a の知識モデル多層化 (文分割 → zone → claims → 検証 → 論証) を
               走らせるか (R2a 設計書 §9)。**M7 でフリップするまで既定 False**。
               True にすると ①資料を文へ切り ②cc-analysis で文脈ラベルと主張を
-              取り ③層タグを刻んで layers サイドカーを書く (検証 ⑤ と論証 ⑥ は
-              M5/M6)。offline では LLM を呼べないので、元セッションの
+              取り ③層タグを刻み ⑤3 検証器で主張と因果候補を検証し ⑥論証と
+              内部矛盾を判定して layers サイドカーを書く。offline では
+              LLM を呼べないので、元セッションの
               サイドカーがあれば再利用し、無ければ層抽出を飛ばして完走する。
               ⑦meta (polarity 充填・provenance・投影・layer_model 刻印) はこの
               フラグに依らず常に走る — 層タグが無ければ投影は素通しなので、
@@ -380,6 +459,27 @@ def run_pipeline(
             kg, zones=layers_doc.get("zones", ()),
             claims=layers_doc.get("claims", ()),
             ontology=layers_doc.get("ontology"))
+
+    # ---- ⑤validate + ⑥rhetoric (設計書 §7/§6) ----
+    # 層タグを刻んだ**後**に置く: causes 候補の判定を ④relate 後の glyph で
+    # 揃えるため。ここで書いた edge["validation"] を ⑦meta の投影が読み、
+    # 裏付けの足りない causes 候補は矢印にならない (規則④/⑩)。
+    summary["validation"], summary["rhetoric"], checked_ids = _validation_stages(
+        client, session=session, kg=kg, layers_doc=layers_doc,
+        offline=offline, progress=progress)
+    for vid in checked_ids:                  # 実際に走った検証器だけを並べる
+        if vid not in validator_ids:
+            validator_ids.append(vid)
+    if layers_doc is not None and summary["layers"].get("saved"):
+        # 検証結果と論証をサイドカーへ書き戻す (生成時 1 回書きの原則は保つ —
+        # 同じ run の中での確定であって、後から書き換えているわけではない)
+        try:
+            summary["layers"]["saved"] = str(
+                layers_store.save(session, layers_doc))
+            summary["layers"]["stats"] = layers_doc.get("stats", {})
+        except OSError as exc:
+            logger.warning("layers sidecar not updated: %s", type(exc).__name__)
+
     summary["meta"] = apply_meta(kg, extractor_model=extractor_model,
                                  validator_ids=validator_ids)
 

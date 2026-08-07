@@ -46,7 +46,7 @@ SESSION_RE = re.compile(r"^[0-9A-Za-z_\-]{1,64}$")
 EDGE_FIELDS = ("id", "from", "to", "label", "glyph", "confidence",
                "epistemic_status", "evidence_span", "causal_check",
                "member_edge_ids", "polarity", "provenance", "origin",
-               "layer_tags", "claim_refs")
+               "layer_tags", "claim_refs", "validation")
 NODE_FIELDS = ("id", "label", "kind", "community_id", "importance",
                "aggregate_id", "visible_at", "origin",
                "onto_class", "claim_refs")
