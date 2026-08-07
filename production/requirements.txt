@@ -1,0 +1,11 @@
+# Concept Cartographer 実運用版 — 依存一式のインストール入口
+#
+#   cd production
+#   python3.11 -m venv .venv                # M1 Mac は /opt/homebrew/bin/python3.11 を使う
+#   ./.venv/bin/pip install -r requirements.txt
+#
+# 依存の定義の正は pyproject.toml (単一の出所)。このファイルはそれを参照する
+# だけなので、パッケージ一覧が二重管理でずれることはない。
+# 内訳: 本体 (抽出・詳細度・検証・描画) + dev (pytest) + web (FastAPI/uvicorn)。
+# 注意: mcp は 1.x 固定 (2.0 は cryptography の arm64 wheel が壊れている・実測)。
+-e .[dev,web]

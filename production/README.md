@@ -24,7 +24,9 @@ PoC (`../poc/`, タグ `poc-v1`) の実証済み資産を土台に、実運用�
 
 ```bash
 cd production
-python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
+# セットアップ (M1 Mac は /opt/homebrew/bin/python3.11 で venv を作ること)
+python3.11 -m venv .venv
+./.venv/bin/pip install -r requirements.txt   # 本体 + テスト + Web の依存一式
 
 # 地図生成（詳細度は依頼文から自動判定。既定 standard）
 ./.venv/bin/python -m cc_orchestrator.chat "今週の研究を概念地図として整理して"
@@ -167,7 +169,7 @@ CLI と同じパイプラインをブラウザから使うローカル Web ア�
 
 ```bash
 cd production
-./.venv/bin/pip install -e ".[dev,web]"
+# 依存は requirements.txt で導入済み (web も含まれる)
 ./scripts/start_web.sh          # 127.0.0.1:8090（0.0.0.0 では bind しない）
 open http://127.0.0.1:8090
 ```

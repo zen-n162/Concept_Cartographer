@@ -74,7 +74,8 @@ git worktree add ../ConceptCartographer-poc poc  # main と並べて置く場合
 
 ```bash
 cd production
-python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev,web]"
+python3.11 -m venv .venv                       # M1 Mac は /opt/homebrew/bin/python3.11
+./.venv/bin/pip install -r requirements.txt    # 依存一式 (本体+テスト+Web)
 ./.venv/bin/python -m cc_orchestrator.chat "今週の研究を概念地図として整理して"
 ./.venv/bin/pytest -m "not e2e"     # 650+ 件
 ```
