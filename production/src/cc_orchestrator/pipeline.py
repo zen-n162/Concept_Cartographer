@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -33,7 +34,7 @@ from cc_core.learning import (
 )
 from cc_core.logging_util import get_logger
 from cc_core.mcp_client import extract_json
-from cc_core.normalize import normalize_kg
+from cc_core.normalize import merge_extraction, normalize_kg
 from cc_core.overlap import check_overlaps
 from cc_core.svg_export import write_svg
 from cc_core.validate import validate_layout_plan
@@ -231,6 +232,112 @@ def _mark_verifier_errors(kg: dict[str, Any]) -> int:
     if marked:
         logger.warning("causal verifier contract violations: %d edges", marked)
     return marked
+
+
+# -------------------------------------- 抽出の粒度が足りないとき (裁定 AE)
+#
+# 抽出指示は Detailed 粒度 (概念 30〜80) を求めるが、資料が薄い日や、モデルが
+# 上位概念だけで満足した日は 20 個前後で返ってくる。そうなると 3 レベルの帯
+# (10-20 / 20-50 / 50-100) の下側に全量が収まり、Standard と Detailed が
+# **同じ地図**になる (ユーザー報告の症状そのもの)。
+#
+# そこで概念が CC_EXTRACT_MIN 未満のときだけ、**深掘りを 1 call** 足す。
+# 常に 2 call にはしない — 十分に細かい抽出まで倍額にする理由が無い。
+
+EXTRACT_MIN_DEFAULT = 25
+ENV_EXTRACT_MIN = "CC_EXTRACT_MIN"
+
+
+def extract_min() -> int:
+    """深掘りの発動閾値 (`CC_EXTRACT_MIN`、既定 25)。
+
+    Standard の帯 (20-50) の下端より少し上に置く。ここを下回ると Standard に
+    全量が収まって Detailed と差が出ないため、「三段に分化しない」の判定線と
+    ほぼ同じ意味になる。`extract_max` と同じく**呼び出しのたびに読む**。
+    """
+    raw = os.environ.get(ENV_EXTRACT_MIN, "").strip()
+    if not raw:
+        return EXTRACT_MIN_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("%s=%r を整数として読めません: 既定 %d を使います",
+                       ENV_EXTRACT_MIN, raw, EXTRACT_MIN_DEFAULT)
+        return EXTRACT_MIN_DEFAULT
+
+
+def _expand_prompt(kg: dict[str, Any], *, window: str, docs_block: str,
+                   local_only: bool) -> str:
+    """深掘り 1 call のプロンプト (裁定 AE)。
+
+    既存ラベルを渡して「重複させない」ことと、**新しく足す概念だけ**を返させる
+    ことが要点。全量を作り直させると、同じ概念が別 id で返って統合が
+    「ほぼ全部が重複」になり、1 call ぶんが無駄になる。
+    """
+    labels = [str(n.get("label") or "") for n in kg.get("nodes") or ()]
+    prompt = (
+        f"先ほど抽出した概念地図は粒度が粗すぎます (概念 {len(labels)} 個)。"
+        f"同じ資料 (対象期間: {window}) から、**より細かい下位概念**を追加で"
+        "抽出してください。\n\n"
+        "すでに抽出済みの概念 (これらは出力に含めないでください):\n"
+        + "\n".join(f"- {label}" for label in labels)
+        + "\n\n追加してほしいもの: 手法の構成要素・実験条件・個別の結果・"
+        "具体的な数値指標などの下位概念を 20〜40 個と、その関係 "
+        "(新概念どうし・新概念と既存概念の両方)。\n"
+        "出力は knowledge_graph JSON のみ (前置き・後置き・コードフェンス禁止)。\n"
+        "- nodes には**新しく足す概念だけ**を入れる (既出の概念は入れない)。\n"
+        "- edges の from / to には、この出力の新しい概念 id か、"
+        "**既存概念のラベルをそのまま**書く。\n"
+        "- 各エッジに evidence_span を配列で付け、surface に原文をそのまま入れる。\n"
+        "**資料に無いものを足さないでください** — 増やすのは粒度であって、"
+        "資料に無いものを足すことではありません。細かい概念が資料から読み取れ"
+        "なければ、無理に数を合わせず少ないままで構いません。\n"
+    )
+    if not local_only:
+        prompt += ("必要なら Work IQ ツールで同じ資料を読み直して構いません。\n")
+    if docs_block:
+        prompt += f"\n=== 添付資料 ===\n{docs_block}"
+    return prompt
+
+
+def _expand_extraction(client: FoundryAgentsV2 | None, kg: dict[str, Any], *,
+                       window: str, docs_block: str,
+                       local_only: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    """概念が薄いときだけ深掘りを 1 call 足す (裁定 AE)。
+
+    戻り値は (KG, summary["extraction"])。**発動の有無を必ず記録する** —
+    黙ってノードを増やすと、同じ依頼で数が変わった理由を後から説明できない。
+
+    深掘りが失敗しても地図は作る (error を記録して素通し)。粒度の底上げは
+    地図そのものの前提ではないので、1 回の追加抽出の事故で run を落とさない。
+    """
+    minimum = extract_min()
+    nodes = len(kg.get("nodes") or ())
+    info: dict[str, Any] = {"mode": "llm", "nodes": nodes, "min": minimum,
+                            "expanded": False}
+    if nodes >= minimum or client is None:
+        return kg, info
+
+    logger.info("extraction is shallow (%d < %d): deepening once", nodes, minimum)
+    info["before"] = nodes
+    try:
+        fragment = extract_json(client.run(
+            "cc-extraction",
+            _expand_prompt(kg, window=window, docs_block=docs_block,
+                           local_only=local_only)))
+        if not isinstance(fragment, dict) or not fragment.get("nodes"):
+            raise ValueError("深掘りが概念を返しませんでした")
+        merged, report = merge_extraction(kg, fragment)
+    except Exception as exc:      # 追加抽出の事故で地図を失わせない
+        logger.warning("deep extraction skipped: %s: %s", type(exc).__name__, exc)
+        info["error"] = f"{type(exc).__name__}: {exc}"
+        return kg, info
+
+    info["expanded"] = True
+    info["merge"] = report.to_dict()
+    info["nodes"] = len(merged.get("nodes") or ())
+    logger.info("deep extraction merged: %d -> %d concepts", nodes, info["nodes"])
+    return merged, info
 
 
 def _layers_stage(
@@ -704,6 +811,11 @@ def run_pipeline(
         summary["ingest"] = {"mode": "kg_file", "file": kg_file}
         if norm.repairs:
             summary["ingest"]["normalized"] = norm.to_dict()
+        # 深掘り (裁定 AE) は**行わない**。kg_file は保存済みの抽出結果を
+        # 読み直す経路で、資料そのものが手元に無いため追加抽出の根拠が無い。
+        summary["extraction"] = {"mode": "kg_file",
+                                 "nodes": len(kg.get("nodes") or ()),
+                                 "expanded": False}
         # 抽出済みの KG を読んだ時点で「概念抽出」は完了している (UI の
         # チェックリストが途中で止まって見えないよう、ここで通知する)
         _notify(progress, "extract")
@@ -776,6 +888,13 @@ def run_pipeline(
         if norm.repairs or norm.warnings:
             summary["normalized"] = norm.to_dict()
             logger.info("kg normalized: %s", norm.repairs)
+
+        # ---- 裁定 AE: 粒度が足りないときだけ深掘りを 1 call ----
+        # online の map 経路だけ。offline は LLM を呼べず、kg_file は資料が
+        # 手元に無いので、どちらもここへ来ない。
+        kg, summary["extraction"] = _expand_extraction(
+            client, kg, window=window, local_only=local_only,
+            docs_block=(bundle(docs)[:LOCAL_BUDGET] if docs else ""))
 
     # ---- フック 2: 学習の自動適用 (§5.3) ----
     # 改名辞書・除外リストを当て、因果上書きの印を付ける。**必ず内訳を返す**
