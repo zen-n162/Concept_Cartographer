@@ -586,6 +586,21 @@
         }
       }
     },
+    "unresolved_labels": {
+      "type": "array",
+      "description": "逃げ場が無く重なりを解消できなかったエッジラベル (レイアウト重なり設計書 裁定AC)。空なら省略される",
+      "items": {
+        "type": "object",
+        "required": ["edge"],
+        "properties": {
+          "level": {"type": "string"},
+          "edge": {"type": "string"},
+          "truncated": {"type": ["string", "null"]},
+          "blocked_by": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
     "gaps": {
       "type": "array",
       "description": "ギャップ候補 (確定は人間, 計画 裁定8 / G4)",

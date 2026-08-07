@@ -24,7 +24,7 @@ from typing import Any
 
 from cc_core.logging_util import get_logger, label_digest
 from cc_core.mcp_client import ExcalidrawClient, ToolCallError
-from cc_core.overlap import resolve_label_offset
+from cc_core.overlap import plan_label_layout
 from cc_core.validate import validate_layout_plan
 
 logger = get_logger("cc_core.adapter")
@@ -211,10 +211,14 @@ async def render_layout_plan(
             )
 
         # --- 3) edges ---
-        nodes_by_id = {n["id"]: n for n in plan["nodes"]}
+        # ラベル位置はビュー全体の一括プランナーが決める (設計書 裁定 AA)。
+        # svg_export も同じ関数を呼ぶので、canvas と SVG の位置が一致する。
+        placements = plan_label_layout(plan)
         for edge in plan.get("edges", []):
             glyph = GLYPH_STYLES[edge["glyph"]]
-            label = edge.get("label", "")
+            placement = placements.get(edge["id"])
+            # プランナーが短縮したときは短縮後の文字列を描く (裁定 AC)
+            label = placement.text if placement is not None else edge.get("label", "")
             args: dict[str, Any] = {
                 "id": edge_element_id(edge["id"]),
                 "type": "arrow",
@@ -231,24 +235,27 @@ async def render_layout_plan(
                 args["endArrowhead"] = glyph["endArrowhead"]
 
             text = f"{glyph['label_prefix']}{label}".strip()
-            # 中点に置くと他ノードへ重なるエッジ (中間ノードを飛び越す線など) は
-            # ラベルを線に紐付けず、衝突しない位置へ独立テキストとして逃がす
-            offset = resolve_label_offset(edge, nodes_by_id) if text else None
-            if text and offset is None:
+            # 中点に置くと他ノード・島タイトル・他ラベルへ重なるエッジ
+            # (中間ノードを飛び越す線など) は、ラベルを線に紐付けず、
+            # プランナーが決めた位置へ独立テキストとして逃がす
+            retreated = bool(text and placement is not None and placement.retreated)
+            if text and not retreated:
                 args["text"] = text
                 args["fontSize"] = EDGE_FONT_SIZE
                 args["fontFamily"] = "hand"
             await create(edge_element_id(edge["id"]), args)
 
-            if text and offset is not None:
-                cx, cy = offset
-                width = max(20.0, len(text) * EDGE_FONT_SIZE * 0.8)
+            if retreated:
+                assert placement is not None  # retreated が True なら必ず在る
+                # プランナーの x/y はラベル矩形の中心。Excalidraw の text は
+                # 左上原点なので、幅・高さの半分だけ戻す
+                width, height = placement.width, placement.height
                 await create(
                     edge_element_id(edge["id"]) + "-label",
                     {
                         "id": edge_element_id(edge["id"]) + "-label",
                         "type": "text",
-                        "x": cx - width / 2, "y": cy - EDGE_FONT_SIZE * 0.75,
+                        "x": placement.x - width / 2, "y": placement.y - height / 2,
                         "text": text,
                         "fontSize": EDGE_FONT_SIZE,
                         "fontFamily": "hand",

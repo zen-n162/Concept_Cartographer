@@ -34,6 +34,7 @@ from cc_core.learning import (
 from cc_core.logging_util import get_logger
 from cc_core.mcp_client import extract_json
 from cc_core.normalize import normalize_kg
+from cc_core.overlap import check_overlaps
 from cc_core.svg_export import write_svg
 from cc_core.validate import validate_layout_plan
 from cc_orchestrator import analysis, qa
@@ -896,6 +897,32 @@ def run_pipeline(
                     for t in GAP_TYPES},
         "by_gap_type": {k: sum(1 for g in gap_list if g.gap_type == k)
                         for k in GAP_KINDS},
+    }
+
+    # ---- 可読性: 実際に描かれる位置での重なり検査 (レイアウト重なり設計書 裁定 AC) ----
+    # ラベルは cc_core.overlap の一括プランナーが逃がすが、逃げ場が無いことも
+    # ある。黙って重ねるとユーザーには「壊れた図」としか見えないので、
+    # plan と summary の両方に残す。
+    overlap_levels: dict[str, dict[str, int]] = {}
+    unresolved: list[dict[str, Any]] = []
+    for lvl in plan.get("levels", {}) or {level: None}:
+        report = check_overlaps(project(plan, lvl))
+        overlap_levels[lvl] = {
+            "label_on_node": len(report.label_on_node),
+            "label_on_label": len(report.label_on_label),
+        }
+        for item in report.unresolved_labels:
+            unresolved.append({"level": lvl, **item})
+    if unresolved:
+        plan["unresolved_labels"] = unresolved
+        logger.warning("unresolved edge labels: %s",
+                       [u["edge"] for u in unresolved][:10])
+    summary["overlaps"] = {
+        "clean": not unresolved and all(
+            v["label_on_node"] == 0 and v["label_on_label"] == 0
+            for v in overlap_levels.values()),
+        "by_level": overlap_levels,
+        "unresolved_labels": unresolved,
     }
 
     check = validate_layout_plan(plan)

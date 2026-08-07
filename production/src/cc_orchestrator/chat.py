@@ -83,6 +83,7 @@ from cc_core.editing import (
     rebuild_session,
 )
 from cc_core.gaps import apply_decision, usefulness_rate
+from cc_core.overlap import check_overlaps
 from cc_core.verifiers import rejection_path
 from cc_core.learning import (
     cue_warnings,
@@ -222,6 +223,16 @@ def _summary_body(s: dict) -> None:
             + (f"(集約{v['aggregates']})" if v.get("aggregates") else "")
             for k, v in lv.items())
         print(f"🔍 詳細度: {cells}   帯検査: {s.get('band_check')}")
+    ov = s.get("overlaps") or {}
+    if ov and not ov.get("clean", True):
+        un = ov.get("unresolved_labels") or []
+        worst = "  ".join(
+            f"{k}: ラベル/ノード {v['label_on_node']}・ラベル/ラベル {v['label_on_label']}"
+            for k, v in (ov.get("by_level") or {}).items()
+            if v["label_on_node"] or v["label_on_label"])
+        print(f"⚠️  ラベルの重なり: {worst or '解消済み'}"
+              + (f"   逃げ場なし {len(un)} 件 "
+                 f"({', '.join(u['edge'] for u in un[:5])})" if un else ""))
     lr = s.get("learned") or {}
     if lr.get("enabled"):
         print(f"🎓 {report_line(lr)}"
@@ -803,6 +814,14 @@ def main() -> None:
             sys.exit(f"❌ 描画に失敗しました: {'; '.join(result.get('errors', []))}")
         url = os.environ.get("EXCALIDRAW_CANVAS_URL", "http://127.0.0.1:3000")
         print(f"🖼  {level}: {len(result.get('created', []))} 要素を描画しました\n💾 {url}")
+        # この経路は run_pipeline を通らないので、可読性の警告もここで出す
+        # (黙って重ねない: レイアウト重なり設計書 裁定 AC)
+        rep = check_overlaps(view)
+        if not rep.clean:
+            print(f"⚠️  ラベルの重なり: ラベル/ノード {len(rep.label_on_node)} 件・"
+                  f"ラベル/ラベル {len(rep.label_on_label)} 件"
+                  + (f"   逃げ場なし {len(rep.unresolved_labels)} 件"
+                     if rep.unresolved_labels else ""))
         return
 
     # --- ドリルダウン (v3 §2.4④) ---

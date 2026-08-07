@@ -20,6 +20,7 @@ from cc_core.adapter import (
 )
 from cc_core.logging_util import get_logger, label_digest
 from cc_core.mcp_client import ExcalidrawClient
+from cc_core.overlap import plan_label_layout
 
 logger = get_logger("cc_core.verify")
 
@@ -111,11 +112,16 @@ async def verify_scene(plan: dict[str, Any], client: ExcalidrawClient) -> dict[s
                         "actual_digest": label_digest(actual),
                     }
                 )
+    # 逃げ場が無いラベルはプランナーが短縮して描く (cc_core.overlap 裁定 AC)。
+    # 期待値は plan の生ラベルではなく「描くよう指示した文字列」で取る。
+    placements = plan_label_layout(plan)
     for edge in plan.get("edges", []):
         el = by_id.get(edge_element_id(edge["id"]))
         if el is not None:
             prefix = GLYPH_STYLES[edge["glyph"]]["label_prefix"]
-            expected = f"{prefix}{edge.get('label', '')}".strip()
+            pl = placements.get(edge["id"])
+            drawn = pl.text if pl is not None else edge.get("label", "")
+            expected = f"{prefix}{drawn}".strip()
             actual = _element_label(el, texts_by_container)
             if not actual:
                 # 中点で他ノードに重なるラベルは、線に紐付けず独立テキストとして

@@ -7,7 +7,8 @@ layout_plan から直接 SVG を描く。
 描画規則は cc_core.adapter / excalidraw_file と同一に保つ:
   - glyph 配色・破線・半透明 (ギャップと対立候補は非断定表示)
   - 集約ノードは別配色で「畳まれている」ことを示す
-  - エッジラベルは中点、衝突時は cc_core.overlap の退避位置
+  - エッジラベルは cc_core.overlap の一括プランナーが決めた位置
+    (adapter と同じ関数を呼ぶので canvas と SVG で位置が一致する)
 手描き風の揺らぎは SVG フィルタ (feTurbulence) で近似する。
 """
 
@@ -21,7 +22,7 @@ from typing import Any
 from cc_core.adapter import GAP_OPACITY, GLYPH_STYLES, NODE_HEIGHT_RATIO
 from cc_core.layout import EDGE_FONT, NODE_FONT
 from cc_core.logging_util import get_logger
-from cc_core.overlap import resolve_label_offset
+from cc_core.overlap import plan_label_layout
 from cc_core.textmetrics import wrap_to_lines
 
 logger = get_logger("cc_core.svg_export")
@@ -72,6 +73,8 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
 
     nodes = {n["id"]: n for n in plan["nodes"]}
     gap_comms = {i["community_id"] for i in plan.get("islands", []) if i.get("is_gap")}
+    # ラベル位置は adapter (canvas) と同じ一括プランナーから取る (設計書 §2)
+    placements = plan_label_layout(plan)
     parts: list[str] = []
 
     parts.append(
@@ -141,14 +144,16 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
             f'stroke="{g["strokeColor"]}" stroke-width="{g["strokeWidth"]}" '
             f'opacity="{op:.2f}"{_dash(g["strokeStyle"], g["strokeWidth"])}{marker}/></g>'
         )
-        label = f'{g["label_prefix"]}{edge.get("label", "")}'.strip()
+        placement = placements.get(edge["id"])
+        # プランナーが短縮したときは短縮後の文字列を描く (裁定 AC)
+        raw = placement.text if placement is not None else edge.get("label", "")
+        label = f'{g["label_prefix"]}{raw}'.strip()
         if not label:
             continue
-        offset = resolve_label_offset(edge, nodes)
-        if offset is None:
+        if placement is None:
             lx, ly = (ax + bx) / 2, (ay + by) / 2
         else:
-            lx, ly = offset[0] + ox, offset[1] + oy
+            lx, ly = placement.x + ox, placement.y + oy
         parts.append(
             f'<text{eid} x="{lx:.0f}" y="{ly:.0f}" font-size="{EDGE_FONT}" '
             f'text-anchor="middle" fill="{g["strokeColor"]}" opacity="{op:.2f}" '
