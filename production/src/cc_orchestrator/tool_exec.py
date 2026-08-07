@@ -37,6 +37,10 @@ class ToolExecutor:
         self.last_plan: dict | None = None
         self.last_render: dict | None = None
         self.local_available = True
+        # パイプラインが確定させた plan。設定されている間は、エージェントが
+        # ツール引数に復唱してきた plan を**信用しない** (LLM の復唱は島の欠落
+        # など静かに壊れることがある【実測 2026-08-07: RENDER_FAILED】)。
+        self.authoritative_plan: dict | None = None
 
     # -- entry point (FoundryAgents.run_agent から呼ばれる) --
     def __call__(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -81,8 +85,17 @@ class ToolExecutor:
     # -- 描画系 --
     def tool_render_layout_plan(self, args: dict) -> dict:
         passed = _as_dict(args["plan"]) if args.get("plan") is not None else None
-        # 描画対象も取り違えを防ぐ (KG を渡されたら直前の layout_plan を描く)
-        if self._looks_like_plan(passed):
+        if self.authoritative_plan is not None:
+            # 確定 plan がある間はそれだけを描く。復唱との差異は握り潰さず記録
+            plan = self.authoritative_plan
+            if passed is not None and passed != plan:
+                logger.warning(
+                    "render: エージェントの復唱が確定 plan と異なるため無視 "
+                    "(nodes %s→%s / islands %s→%s)",
+                    len(passed.get("nodes", []) or []), len(plan.get("nodes", [])),
+                    len(passed.get("islands", []) or []), len(plan.get("islands", [])))
+        # 取り違え防止 (KG を渡されたら直前の layout_plan を描く)
+        elif self._looks_like_plan(passed):
             plan = passed
         elif self.last_plan is not None:
             logger.info("render: layout_plan 以外が渡されたため直前の計算結果を描画")
@@ -105,7 +118,9 @@ class ToolExecutor:
         return result
 
     def tool_verify_scene(self, args: dict) -> dict:
-        plan = _as_dict(args.get("plan") or self.last_plan)
+        # 検証も確定 plan を正とする (復唱された plan で検証すると、壊れた復唱
+        # どうしの突合になり検証の意味が消えるため)
+        plan = _as_dict(self.authoritative_plan or args.get("plan") or self.last_plan)
         if self.target == "file":
             # ファイル経路では生成済みシーンと計画を突合する (MCP 不要)
             from cc_core.excalidraw_file import build_scene

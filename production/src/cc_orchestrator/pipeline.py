@@ -646,6 +646,10 @@ def run_pipeline(
     _notify(progress, "render")
     view = project(plan, level)
     view_json = json.dumps(view, ensure_ascii=False)
+    # 描画・検証の対象はここで確定させる。エージェント経路では LLM が plan を
+    # 復唱してツールへ渡すが、復唱は静かに壊れる【実測: 島の欠落で
+    # RENDER_FAILED】ため、ツール側はこの確定 plan だけを使う。
+    executor.authoritative_plan = view
     verdict: dict[str, Any] = {}
     if offline:
         # エージェントを介さず実行系を直接叩く。往復が無いので再試行も不要。
