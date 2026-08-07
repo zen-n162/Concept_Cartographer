@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -34,14 +35,14 @@ from cc_core.learning import (
 )
 from cc_core.logging_util import get_logger
 from cc_core.mcp_client import extract_json
-from cc_core.normalize import merge_extraction, normalize_kg
+from cc_core.normalize import extract_max, merge_extraction, normalize_kg
 from cc_core.overlap import check_overlaps
 from cc_core.svg_export import write_svg
 from cc_core.validate import validate_layout_plan
 from cc_orchestrator import analysis, qa
 from cc_orchestrator.agents_def import AGENT_SPECS, MODELS
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
-from cc_orchestrator.ingest import Doc, bundle, ingest, parse_window
+from cc_orchestrator.ingest import PER_DOC_CHARS, Doc, bundle, ingest, parse_window
 from cc_orchestrator.routing import RouteDecision, route
 from cc_orchestrator.tool_exec import ToolExecutor
 from cc_store import SessionStore
@@ -234,110 +235,295 @@ def _mark_verifier_errors(kg: dict[str, Any]) -> int:
     return marked
 
 
-# -------------------------------------- 抽出の粒度が足りないとき (裁定 AE)
+# ------------------------------ 資料ごとの追加抽出ループ (裁定 AM = 抽出 v2)
 #
-# 抽出指示は Detailed 粒度 (概念 30〜80) を求めるが、資料が薄い日や、モデルが
-# 上位概念だけで満足した日は 20 個前後で返ってくる。そうなると 3 レベルの帯
-# (10-20 / 20-50 / 50-100) の下側に全量が収まり、Standard と Detailed が
-# **同じ地図**になる (ユーザー報告の症状そのもの)。
+# v1 は「概念 30〜80 個」と**指示するだけ**だった。指示は守られないことがあり、
+# 同じ依頼で 64 のときと 20 のときがある (実測)。粒度そのものより
+# **再現しないこと**が問題で、指示を強くしても再現性は買えない。
 #
-# そこで概念が CC_EXTRACT_MIN 未満のときだけ、**深掘りを 1 call** 足す。
-# 常に 2 call にはしない — 十分に細かい抽出まで倍額にする理由が無い。
+# v2 は仕組みで保証する: 初回抽出のあと概念が目標に届かなければ、**資料を
+# 1 件ずつ回して**追加抽出する。1 call = 1 資料に絞ると、
+#   - ローカル本文がある資料は本文をそのまま渡せる (連結した束への単一スライス
+#     LOCAL_BUDGET では、資料が多いと後半が黙って切れていた)
+#   - Work IQ 資料は「この 1 件だけ読み直して」と指示できる。本文はこちらへ
+#     届かないので、資料名で指すしか手が無い (調査で判明した事実 1)
+# どちらの経路でも既存ラベル一覧を毎回渡して重複を抑え、
+# **資料に無いものは足さない**を毎回書く (創作禁止が上位原則)。
 
-EXTRACT_MIN_DEFAULT = 25
-ENV_EXTRACT_MIN = "CC_EXTRACT_MIN"
+DETAILED_TARGET_DEFAULT = 45
+ENV_DETAILED_TARGET = "CC_DETAILED_TARGET"
+EXPAND_MAX_CALLS_DEFAULT = 5
+ENV_EXPAND_MAX_CALLS = "CC_EXPAND_MAX_CALLS"
+DRY_LIMIT = 2       # 新規ゼロが 2 資料続いたら、この資料束からはもう出ない
 
 
-def extract_min() -> int:
-    """深掘りの発動閾値 (`CC_EXTRACT_MIN`、既定 25)。
+def _env_int(name: str, default: int, *, floor: int = 0) -> int:
+    """環境変数を整数で読む (**呼び出しのたびに**読む)。
 
-    Standard の帯 (20-50) の下端より少し上に置く。ここを下回ると Standard に
-    全量が収まって Detailed と差が出ないため、「三段に分化しない」の判定線と
-    ほぼ同じ意味になる。`extract_max` と同じく**呼び出しのたびに読む**。
+    Web は常駐プロセスなので、import 時に固定すると再起動なしに変えられない。
+    読めない値は既定へ倒して警告を出す (黙って 0 にすると挙動が消える)。
     """
-    raw = os.environ.get(ENV_EXTRACT_MIN, "").strip()
+    raw = os.environ.get(name, "").strip()
     if not raw:
-        return EXTRACT_MIN_DEFAULT
+        return default
     try:
-        return max(0, int(raw))
+        return max(floor, int(raw))
     except ValueError:
         logger.warning("%s=%r を整数として読めません: 既定 %d を使います",
-                       ENV_EXTRACT_MIN, raw, EXTRACT_MIN_DEFAULT)
-        return EXTRACT_MIN_DEFAULT
+                       name, raw, default)
+        return default
 
 
-def _expand_prompt(kg: dict[str, Any], *, window: str, docs_block: str,
-                   local_only: bool) -> str:
-    """深掘り 1 call のプロンプト (裁定 AE)。
+def detailed_target() -> int:
+    """追加抽出ループの目標概念数 (`CC_DETAILED_TARGET`、既定 45)。
 
-    既存ラベルを渡して「重複させない」ことと、**新しく足す概念だけ**を返させる
-    ことが要点。全量を作り直させると、同じ概念が別 id で返って統合が
-    「ほぼ全部が重複」になり、1 call ぶんが無駄になる。
+    Standard の帯 (20-50) の中ほど。ここを超えると Standard に全量が収まらず、
+    Detailed が本当に別の地図になる — 「三段に分化する」の実務的な下限線。
+    """
+    return _env_int(ENV_DETAILED_TARGET, DETAILED_TARGET_DEFAULT, floor=1)
+
+
+def expand_max_calls() -> int:
+    """追加抽出に使ってよい LLM call の上限 (`CC_EXPAND_MAX_CALLS`、既定 5)。
+
+    抽出系は初回 1 + 追加 5 = 最大 6 call (裁定 AP)。0 を入れれば追加抽出を
+    完全に止められる (費用の緊急ブレーキ)。
+    """
+    return _env_int(ENV_EXPAND_MAX_CALLS, EXPAND_MAX_CALLS_DEFAULT, floor=0)
+
+
+@dataclass
+class _Source:
+    """追加抽出で 1 call を割り当てる資料 1 件。"""
+
+    name: str
+    text: str       # ローカル本文。Work IQ 資料は空 (向こう側で読み直させる)
+
+    @property
+    def kind(self) -> str:
+        return "local" if self.text else "workiq"
+
+
+def _document_roster(kg: dict[str, Any], docs: list[Any], *,
+                     local_only: bool) -> list[_Source]:
+    """巡回する資料の一覧 (ローカル Doc + `kg["source_files"]` の和集合)。
+
+    並びは「本文を持つ資料 → Work IQ 資料」で、それぞれ元の順のまま
+    (**決定的** — 同じ入力なら必ず同じ巡回順になる)。本文を持つ資料を先に
+    回すのは 1 call あたりの取り分が大きいから: Work IQ 資料は向こうで
+    読み直す往復が要り、空振りも起きうる。
+
+    重複は**正規化ラベル**で除去する。`source_files` にはローカル添付資料も
+    載るので、素の文字列一致だと同じ資料に 2 call 使うことがある。
+    local_only のときは本文の無い資料を落とす — 読む手段が無いのに call を
+    投げても空振りするだけ。
+    """
+    from cc_core.editing import normalize_label
+
+    roster: list[_Source] = []
+    seen: set[str] = set()
+
+    def add(name: str, text: str) -> None:
+        name = str(name or "").strip()
+        key = normalize_label(name)
+        if not name or key in seen:
+            return
+        seen.add(key)
+        roster.append(_Source(name=name, text=text))
+
+    for d in docs:
+        add(str(getattr(d, "name", "") or ""), str(getattr(d, "text", "") or ""))
+    if not local_only:
+        for f in kg.get("source_files") or ():
+            if isinstance(f, str):
+                add(f, "")
+    return [s for s in roster if s.text or not local_only]
+
+
+def _expand_prompt(kg: dict[str, Any], source: _Source, *,
+                   window: str, local_only: bool) -> str:
+    """1 資料ぶんの追加抽出プロンプト (裁定 AM)。
+
+    要点は 3 つ: **対象を 1 資料に限る** / **既存ラベルを全部渡す** /
+    **新しく足す概念だけを返させる**。全量を作り直させると同じ概念が別 id で
+    返り、統合が「ほぼ全部が重複」になって 1 call ぶんが無駄になる。
     """
     labels = [str(n.get("label") or "") for n in kg.get("nodes") or ()]
     prompt = (
-        f"先ほど抽出した概念地図は粒度が粗すぎます (概念 {len(labels)} 個)。"
-        f"同じ資料 (対象期間: {window}) から、**より細かい下位概念**を追加で"
-        "抽出してください。\n\n"
+        f"概念地図の粒度を上げます (現在 {len(labels)} 概念)。"
+        f"**資料「{source.name}」1 件だけ**を対象に、まだ挙がっていない概念と"
+        f"関係を追加抽出してください (対象期間: {window})。\n\n"
         "すでに抽出済みの概念 (これらは出力に含めないでください):\n"
         + "\n".join(f"- {label}" for label in labels)
         + "\n\n追加してほしいもの: 手法の構成要素・実験条件・個別の結果・"
-        "具体的な数値指標などの下位概念を 20〜40 個と、その関係 "
+        "具体的な数値指標といった**下位概念**と、それらの関係 "
         "(新概念どうし・新概念と既存概念の両方)。\n"
         "出力は knowledge_graph JSON のみ (前置き・後置き・コードフェンス禁止)。\n"
         "- nodes には**新しく足す概念だけ**を入れる (既出の概念は入れない)。\n"
         "- edges の from / to には、この出力の新しい概念 id か、"
         "**既存概念のラベルをそのまま**書く。\n"
         "- 各エッジに evidence_span を配列で付け、surface に原文をそのまま入れる。\n"
-        "**資料に無いものを足さないでください** — 増やすのは粒度であって、"
-        "資料に無いものを足すことではありません。細かい概念が資料から読み取れ"
-        "なければ、無理に数を合わせず少ないままで構いません。\n"
+        "**この資料に無いものを足さないでください** — 増やすのは粒度であって、"
+        "資料に無いものを足すことではありません。新しい下位概念がこの資料から"
+        '読み取れなければ、数を合わせずに {"nodes": [], "edges": []} を'
+        "返して構いません。\n"
     )
-    if not local_only:
-        prompt += ("必要なら Work IQ ツールで同じ資料を読み直して構いません。\n")
-    if docs_block:
-        prompt += f"\n=== 添付資料 ===\n{docs_block}"
+    if source.text:
+        prompt += (f"\n=== 資料「{source.name}」の本文 ===\n"
+                   f"{source.text[:PER_DOC_CHARS]}")
+    elif not local_only:
+        prompt += (f"\n本文は添付していません。Work IQ ツールで"
+                   f"**「{source.name}」だけ**を読み直し、その資料から抽出して"
+                   "ください (ほかの資料は読まないでください)。\n")
     return prompt
 
 
-def _expand_extraction(client: FoundryAgentsV2 | None, kg: dict[str, Any], *,
-                       window: str, docs_block: str,
-                       local_only: bool) -> tuple[dict[str, Any], dict[str, Any]]:
-    """概念が薄いときだけ深掘りを 1 call 足す (裁定 AE)。
+def _expand_once(client: FoundryAgentsV2, kg: dict[str, Any], source: _Source, *,
+                 window: str, local_only: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    """資料 1 件ぶんの追加抽出 (1 call) と統合。戻りは (KG, per_document の 1 行)。
 
-    戻り値は (KG, summary["extraction"])。**発動の有無を必ず記録する** —
-    黙ってノードを増やすと、同じ依頼で数が変わった理由を後から説明できない。
-
-    深掘りが失敗しても地図は作る (error を記録して素通し)。粒度の底上げは
-    地図そのものの前提ではないので、1 回の追加抽出の事故で run を落とさない。
+    **失敗しても次の資料へ進む** — 粒度の底上げは地図そのものの前提ではない
+    ので、1 資料の事故で run を落とさない。落ちた事実は行に残す。
     """
-    minimum = extract_min()
-    nodes = len(kg.get("nodes") or ())
-    info: dict[str, Any] = {"mode": "llm", "nodes": nodes, "min": minimum,
-                            "expanded": False}
-    if nodes >= minimum or client is None:
-        return kg, info
-
-    logger.info("extraction is shallow (%d < %d): deepening once", nodes, minimum)
-    info["before"] = nodes
+    entry: dict[str, Any] = {"document": source.name, "source": source.kind,
+                             "added_nodes": 0, "added_edges": 0,
+                             "nodes_after": len(kg.get("nodes") or ())}
     try:
         fragment = extract_json(client.run(
             "cc-extraction",
-            _expand_prompt(kg, window=window, docs_block=docs_block,
-                           local_only=local_only)))
-        if not isinstance(fragment, dict) or not fragment.get("nodes"):
-            raise ValueError("深掘りが概念を返しませんでした")
+            _expand_prompt(kg, source, window=window, local_only=local_only)))
+        if not isinstance(fragment, dict):
+            raise ValueError("追加抽出が JSON オブジェクトを返しませんでした")
+        if not fragment.get("nodes") and not fragment.get("edges"):
+            # 「この資料にはもう無い」は**正常な答え**。数合わせを禁じている
+            # 以上、空を返してくるのは指示どおりの振る舞いで、失敗ではない。
+            entry["note"] = "新規なし"
+            return kg, entry
         merged, report = merge_extraction(kg, fragment)
     except Exception as exc:      # 追加抽出の事故で地図を失わせない
-        logger.warning("deep extraction skipped: %s: %s", type(exc).__name__, exc)
-        info["error"] = f"{type(exc).__name__}: {exc}"
+        logger.warning("expand skipped doc=%s: %s: %s",
+                       source.name, type(exc).__name__, exc)
+        entry["error"] = f"{type(exc).__name__}: {exc}"
+        return kg, entry
+
+    entry["added_nodes"] = report.added_nodes
+    entry["added_edges"] = report.added_edges
+    entry["nodes_after"] = len(merged.get("nodes") or ())
+    entry["merge"] = report.to_dict()
+    logger.info("expand doc=%s (%s): +%d nodes +%d edges -> %d concepts",
+                source.name, source.kind, report.added_nodes,
+                report.added_edges, entry["nodes_after"])
+    return merged, entry
+
+
+def _expand_extraction(client: FoundryAgentsV2 | None, kg: dict[str, Any], *,
+                       window: str, docs: list[Any],
+                       local_only: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    """目標に届くまで資料を 1 件ずつ回して追加抽出する (裁定 AM / AP)。
+
+    戻り値は (KG, summary["extraction"])。**何をしたかを必ず記録する** —
+    黙ってノードを増やすと、同じ依頼で数が変わった理由を後から説明できない。
+
+    停止条件は 4 つ (どれで止まったかは `stopped_by` に残す):
+      target     目標概念数に到達した (成功)
+      dry        新規ゼロが 2 資料続いた = この資料束からはもう出ない
+      max_calls  追加抽出の call 上限
+      cap        CC_EXTRACT_MAX (統合後のノード上限)
+    """
+    target, max_calls, limit = detailed_target(), expand_max_calls(), extract_max()
+    before = len(kg.get("nodes") or ())
+    info: dict[str, Any] = {
+        "mode": "llm", "before": before, "nodes": before, "target": target,
+        "max_calls": max_calls, "rounds": 0, "calls": 0,
+        "added_nodes": 0, "added_edges": 0, "expanded": False,
+        "stopped_by": "target", "per_document": [], "documents": [],
+    }
+    if client is None:                        # offline はここへ来ない (保険)
+        info["stopped_by"] = "no_client"
+        return kg, info
+    roster = _document_roster(kg, docs, local_only=local_only)
+    info["documents"] = [f"{s.name} ({s.kind})" for s in roster]
+    if before >= target:
+        return kg, info                       # stopped_by = "target"
+    if before >= limit:
+        info["stopped_by"] = "cap"
+        return kg, info
+    if not roster:
+        info["stopped_by"] = "no_documents"
+        return kg, info
+    if max_calls <= 0:
+        info["stopped_by"] = "max_calls"
         return kg, info
 
-    info["expanded"] = True
-    info["merge"] = report.to_dict()
-    info["nodes"] = len(merged.get("nodes") or ())
-    logger.info("deep extraction merged: %d -> %d concepts", nodes, info["nodes"])
-    return merged, info
+    logger.info("expansion loop start: %d concepts < target %d, %d documents, "
+                "budget %d calls", before, target, len(roster), max_calls)
+    dry = 0
+    stopped = ""
+    round_no = 0
+    while not stopped:
+        round_no += 1
+        for source in roster:                 # 同じ資料は 1 周につき 1 回まで
+            if info["calls"] >= max_calls:
+                stopped = "max_calls"
+                break
+            nodes_now = len(kg.get("nodes") or ())
+            if nodes_now >= target:
+                stopped = "target"
+                break
+            if nodes_now >= limit:
+                stopped = "cap"
+                break
+            kg, entry = _expand_once(client, kg, source, window=window,
+                                     local_only=local_only)
+            entry["round"] = round_no
+            info["per_document"].append(entry)
+            info["calls"] += 1
+            info["added_nodes"] += entry["added_nodes"]
+            info["added_edges"] += entry["added_edges"]
+            if entry["added_nodes"]:
+                dry = 0
+            else:
+                dry += 1
+                if dry >= DRY_LIMIT:
+                    stopped = "dry"
+                    break
+
+    info["stopped_by"] = stopped
+    info["rounds"] = max((e["round"] for e in info["per_document"]), default=0)
+    info["nodes"] = len(kg.get("nodes") or ())
+    info["expanded"] = info["nodes"] > before
+    logger.info("expansion loop done: %d -> %d concepts in %d calls "
+                "(%d rounds, stopped_by=%s)", before, info["nodes"],
+                info["calls"], info["rounds"], stopped)
+    return kg, info
+
+
+# ------------------------------------------------ 正直な上限表示 (裁定 AO)
+
+DETAIL_NOTE = "資料から抽出できる概念が上限です (水増ししていません)"
+
+# 「これ以上は増やせない」と言い切ってよい停止理由。max_calls / cap は
+# **予算を使い切っただけ**で、資料にはまだ概念が残っているかもしれない。
+# そこで「上限」と書けば嘘になるので、黙る。
+EXHAUSTED_STOPS = {"dry", "no_documents", "kg_file"}
+
+
+def _detail_note(summary: dict[str, Any], plan: dict[str, Any]) -> str | None:
+    """Standard と Detailed が同数で、かつ**もう増やせない**ときだけ注記を返す。
+
+    水増ししない (創作禁止が上位原則) 以上、同数になること自体は正しい結果で、
+    ユーザーに要るのは「これはバグではない」の一行。逆に予算切れで止まった
+    ときは注記を出さない — 事実でないことを書かないのが裁定 AO の趣旨。
+    """
+    info = summary.get("extraction") or {}
+    if info.get("stopped_by") not in EXHAUSTED_STOPS:
+        return None
+    levels = plan.get("levels") or {}
+    standard = (levels.get("standard") or {}).get("nodes")
+    detailed = (levels.get("detailed") or {}).get("nodes")
+    if standard is None or detailed is None or standard != detailed:
+        return None
+    return DETAIL_NOTE
 
 
 def _layers_stage(
@@ -811,11 +997,15 @@ def run_pipeline(
         summary["ingest"] = {"mode": "kg_file", "file": kg_file}
         if norm.repairs:
             summary["ingest"]["normalized"] = norm.to_dict()
-        # 深掘り (裁定 AE) は**行わない**。kg_file は保存済みの抽出結果を
-        # 読み直す経路で、資料そのものが手元に無いため追加抽出の根拠が無い。
+        # 追加抽出ループ (裁定 AM) は**行わない** (裁定 AQ)。kg_file は保存済み
+        # の抽出結果を読み直す経路で、資料そのものが手元に無いため追加抽出の
+        # 根拠が無い。stopped_by に "kg_file" を置くのは、「これ以上は増やせ
+        # ない」が事実だから — 裁定 AO の注記はこの状態でも正しい。
         summary["extraction"] = {"mode": "kg_file",
                                  "nodes": len(kg.get("nodes") or ()),
-                                 "expanded": False}
+                                 "expanded": False, "calls": 0, "rounds": 0,
+                                 "added_nodes": 0, "added_edges": 0,
+                                 "stopped_by": "kg_file", "per_document": []}
         # 抽出済みの KG を読んだ時点で「概念抽出」は完了している (UI の
         # チェックリストが途中で止まって見えないよう、ここで通知する)
         _notify(progress, "extract")
@@ -889,12 +1079,13 @@ def run_pipeline(
             summary["normalized"] = norm.to_dict()
             logger.info("kg normalized: %s", norm.repairs)
 
-        # ---- 裁定 AE: 粒度が足りないときだけ深掘りを 1 call ----
-        # online の map 経路だけ。offline は LLM を呼べず、kg_file は資料が
-        # 手元に無いので、どちらもここへ来ない。
+        # ---- 裁定 AM: 目標に届くまで資料を 1 件ずつ回して追加抽出 ----
+        # online の map 経路だけ (裁定 AQ)。offline は LLM を呼べず、kg_file は
+        # 資料が手元に無いので、どちらもここへ来ない。進捗は "extract" のまま
+        # にする — ユーザーから見れば追加抽出も概念抽出の続きで、段を増やすと
+        # 「同じ段が 2 回出る」ように見えるだけ。
         kg, summary["extraction"] = _expand_extraction(
-            client, kg, window=window, local_only=local_only,
-            docs_block=(bundle(docs)[:LOCAL_BUDGET] if docs else ""))
+            client, kg, window=window, docs=docs, local_only=local_only)
 
     # ---- フック 2: 学習の自動適用 (§5.3) ----
     # 改名辞書・除外リストを当て、因果上書きの印を付ける。**必ず内訳を返す**
@@ -1002,6 +1193,13 @@ def run_pipeline(
         logger.warning("detail level band problems: %s", band_problems)
     summary["levels"] = plan["levels"]
     summary["band_check"] = band_problems or "OK"
+
+    # ---- 裁定 AO: 正直な上限表示 ----
+    # plan にも載せる (Web は plan から作った view しか見ない)。
+    note = _detail_note(summary, plan)
+    if note:
+        summary["detail_note"] = plan["detail_note"] = note
+        logger.info("detail_note: %s", note)
 
     # ---- ギャップ候補 (裁定 8) ----
     _notify(progress, "gaps")

@@ -169,6 +169,10 @@ def view_of(session: str, level: str) -> dict[str, Any]:
         "levels": view.get("levels", {}),
         "islands": [{"community_id": i.get("community_id"), "name": i.get("name")}
                     for i in view.get("islands", [])],
+        # 裁定 AO: Standard と Detailed が同数で、かつ資料からこれ以上は
+        # 抽出できないときだけ入る。無いときも "" を返してキーの有無で
+        # 表示側が分岐しないようにする。
+        "detail_note": view.get("detail_note") or "",
         "editable": editing.kg_file(session, graphs_dir=GRAPHS_DIR).exists(),
     }
 

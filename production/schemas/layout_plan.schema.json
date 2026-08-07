@@ -586,6 +586,10 @@
         }
       }
     },
+    "detail_note": {
+      "type": "string",
+      "description": "Standard と Detailed が同数で、かつ資料からこれ以上抽出できないときの注記 (抽出 v2 裁定 AO)。水増ししない代わりに理由を出す。該当しなければ省略される"
+    },
     "unresolved_labels": {
       "type": "array",
       "description": "逃げ場が無く重なりを解消できなかったエッジラベル (レイアウト重なり設計書 裁定AC)。空なら省略される",

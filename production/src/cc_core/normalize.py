@@ -342,10 +342,13 @@ class MergeReport:
     added_nodes: int = 0        # 新しい概念として採用した断片ノード
     added_edges: int = 0        # 採用した断片エッジ
     duplicate_nodes: int = 0    # 正規化ラベルが既出だったので捨てた断片ノード
+    merged_evidence: int = 0    # 既出のノード/エッジへ寄せた evidence_span の本数
+    merged_edges: int = 0       # 同じ関係だったので既存エッジへ畳んだ断片エッジ
     label_resolved: int = 0     # 端点をラベルで既存ノードへ結び直した回数
     dropped_edges: list[str] = field(default_factory=list)   # 端点を解決できず破棄
     capped_nodes: int = 0       # CC_EXTRACT_MAX 超過で後着順に切ったノード
     capped_edges: int = 0       # 切られたノードに繋がっていたエッジ
+    truncated: bool = False     # 上限で切ったか (黙って落とさないための印)
     notes: dict[str, int] = field(default_factory=dict)
 
     def note(self, key: str, n: int = 1) -> None:
@@ -354,11 +357,57 @@ class MergeReport:
     def to_dict(self) -> dict[str, Any]:
         return {"added_nodes": self.added_nodes, "added_edges": self.added_edges,
                 "duplicate_nodes": self.duplicate_nodes,
+                "merged_evidence": self.merged_evidence,
+                "merged_edges": self.merged_edges,
                 "label_resolved": self.label_resolved,
                 "dropped_edges": self.dropped_edges,
                 "capped_nodes": self.capped_nodes,
                 "capped_edges": self.capped_edges,
+                "truncated": self.truncated,
                 "notes": self.notes}
+
+
+def _span_key(span: dict[str, Any]) -> tuple[Any, ...]:
+    """evidence_span の同一性キー。同じ資料の同じ原文は 1 本に畳む。"""
+    return (str(span.get("document_id") or ""), str(span.get("surface") or ""),
+            span.get("char_start"), span.get("char_end"))
+
+
+def _merge_evidence(existing: Any, incoming: Any,
+                    report: MergeReport) -> tuple[list[dict[str, Any]], int]:
+    """既存の evidence_span へ断片側の根拠を足す (裁定 AN)。
+
+    戻りは (統合後の配列, 新しく足した本数)。**両側を正規化してから**比べる —
+    断片側は単一オブジェクトや文字列で来ることがあり、生のまま突き合わせると
+    同じ引用が形の違いだけで 2 本に増える。
+    """
+    local = NormalizeReport()
+    spans = normalize_evidence_span(existing, local)
+    seen = {_span_key(s) for s in spans}
+    added = 0
+    for span in normalize_evidence_span(incoming, local):
+        key = _span_key(span)
+        if key in seen:
+            continue
+        seen.add(key)
+        spans.append(span)
+        added += 1
+    for key_note, n in local.repairs.items():
+        report.note(f"normalize: {key_note}", n)
+    return spans, added
+
+
+def _edge_key(src: str, dst: str, glyph: Any, label: Any) -> tuple[str, ...]:
+    """エッジの意味的な同一性キー (裁定 AN-b)。
+
+    (from, to, glyph, 正規化ラベル)。**glyph が違えば別エッジ**として残す —
+    層タグ (arrow=因果 / wave=相関 / zigzag=矛盾) は意味が違うので、畳むと
+    「因果と相関の両方が主張されている」という状態が消える。
+    glyph は normalize_kg と同じ丸め (未知 -> wave) をしてから比べる。
+    """
+    g = glyph if glyph in VALID_GLYPHS else "wave"
+    from cc_core.editing import normalize_label
+    return (src, dst, str(g), normalize_label(label))
 
 
 def _id_allocator(prefix: str, width: int, used: set[str]):
@@ -379,15 +428,23 @@ def _id_allocator(prefix: str, width: int, used: set[str]):
 def merge_extraction(
     kg: Any, fragment: Any, *, max_nodes: int | None = None,
 ) -> tuple[dict[str, Any], MergeReport]:
-    """深掘り抽出の断片を既存 KG へ統合する (裁定 AE)。
+    """追加抽出の断片を既存 KG へ統合する (裁定 AE → AN)。
 
-    - **正規化ラベルで重複排除**: 既出の概念を別 id で返してきても増やさない
+    - **正規化ラベルで重複排除**: 既出の概念を別 id で返してきても増やさない。
+      ただし**根拠は捨てない** — 重複ノードの evidence_span は既存ノードへ
+      マージする (裁定 AN-a)。資料ごとに 1 call 回す v2 では、2 資料目以降が
+      同じ概念に別の原文を付けてくるのが常態で、ここで捨てると「どの資料から
+      来た概念か」が 1 資料目のぶんしか残らない
     - **id は振り直す**: 断片の c001 と既存の c001 は別物なので必ず採番し直す
     - **エッジ端点はラベルでも解決する**: 断片は既存概念を id ではなくラベルで
       指すことがある (指示でそう書かせている)。id → 既存 id → 正規化ラベル の
       順で引き、解決できないエッジは normalize と同じ流儀で**破棄 + 報告**
+    - **エッジの意味的な重複排除** (裁定 AN-b): (from, to, glyph, 正規化ラベル)
+      が同じなら平行エッジを増やさず evidence をマージする。glyph が違う場合は
+      別エッジとして残す (因果と相関は別の主張なので畳めない)
     - **上限は後着順で切る**: この段には重要度がまだ無いので、順位付けの根拠が
-      無いまま importance 風の切り方をしない (後から来たものを落とす)
+      無いまま importance 風の切り方をしない (後から来たものを落とす)。
+      **切った事実は report に出す** (裁定 AN-c: 黙って落とさない)
 
     戻り値は (統合後の KG, MergeReport)。統合後は必ず `normalize_kg` を通すので、
     断片側の形の揺れ (evidence_span が単一オブジェクト等) もここで吸収される。
@@ -417,8 +474,10 @@ def merge_extraction(
     new_comm_id = _id_allocator("comm_", 3, used_comms)
 
     by_label: dict[str, str] = {}
+    node_by_id: dict[str, dict[str, Any]] = {}
     for n in nodes:
         by_label.setdefault(normalize_label(n.get("label")), str(n.get("id")))
+        node_by_id.setdefault(str(n.get("id")), n)
 
     # --- communities: 名前が一致すれば既存の島へ寄せる ---
     # id は断片側の勝手な採番なので信用できない (断片の comm_001 と既存の
@@ -481,9 +540,18 @@ def merge_extraction(
             continue
         key = normalize_label(label)
         if key in by_label:
+            target_id = by_label[key]
             if old_id:
-                id_map[old_id] = by_label[key]     # 既存概念への参照として使う
+                id_map[old_id] = target_id         # 既存概念への参照として使う
             report.duplicate_nodes += 1
+            # 裁定 AN-a: ノードは増やさないが**根拠は寄せる**
+            target = node_by_id.get(target_id)
+            if target is not None and raw.get("evidence_span"):
+                spans, added = _merge_evidence(
+                    target.get("evidence_span"), raw.get("evidence_span"), report)
+                if spans:
+                    target["evidence_span"] = spans
+                report.merged_evidence += added
             continue
         node = {k: v for k, v in raw.items() if k not in ("id", "community_id")}
         node["id"] = new_node_id()
@@ -492,6 +560,7 @@ def merge_extraction(
         if community:      # 空なら normalize_kg の既定 (comm_000) へ任せる
             node["community_id"] = community
         nodes.append(node)
+        node_by_id[node["id"]] = node
         by_label[key] = node["id"]
         if old_id:
             id_map[old_id] = node["id"]
@@ -500,9 +569,13 @@ def merge_extraction(
     # --- 上限 (後着順で切る) ---
     if len(nodes) > limit:
         report.capped_nodes = len(nodes) - limit
+        report.truncated = True
+        report.note("上限超過で後着順にカット", report.capped_nodes)
         nodes = nodes[:limit]
-        logger.info("merge_extraction capped nodes to %d (dropped %d)",
-                    limit, report.capped_nodes)
+        # 上限に触れたことは**警告**で出す。黙って落とすと「追加抽出したのに
+        # 増えない」の原因が呼び出し側から一切見えない (裁定 AN-c)。
+        logger.warning("merge_extraction capped nodes to %d (dropped %d)",
+                       limit, report.capped_nodes)
     kept = {str(n["id"]) for n in nodes}
 
     def resolve(ref: Any) -> tuple[str | None, str]:
@@ -523,6 +596,15 @@ def merge_extraction(
                  if str(e.get("from")) in kept and str(e.get("to")) in kept]
         report.capped_edges += before - len(edges)
 
+    # 既存エッジの意味的な索引 (裁定 AN-b)。断片が同じ関係を言い直したときに
+    # 平行エッジを増やさず evidence だけを足すために要る。**断片どうしの重複**
+    # も同じ索引で拾えるよう、採用したエッジはここへ登録していく。
+    edge_index: dict[tuple[str, ...], dict[str, Any]] = {}
+    for e in edges:
+        edge_index.setdefault(
+            _edge_key(str(e.get("from")), str(e.get("to")),
+                      e.get("glyph"), e.get("label")), e)
+
     for e in fragment.get("edges") or ():
         if not isinstance(e, dict):
             report.note("断片エッジ: 未知の要素を破棄")
@@ -537,10 +619,23 @@ def merge_extraction(
                 report.note("断片エッジ: 端点を解決できず破棄")
             continue
         report.label_resolved += (how_src == "label") + (how_dst == "label")
+        key = _edge_key(src, dst, e.get("glyph"), e.get("label"))
+        twin = edge_index.get(key)
+        if twin is not None:
+            # 同じ (from, to, glyph, ラベル) — 関係としては同じ主張なので
+            # 本数は増やさず、根拠だけを足す (裁定 AN-b)。
+            spans, added = _merge_evidence(twin.get("evidence_span"),
+                                           e.get("evidence_span"), report)
+            if spans:
+                twin["evidence_span"] = spans
+            report.merged_evidence += added
+            report.merged_edges += 1
+            continue
         edge = {k: v for k, v in e.items() if k not in ("id", "from", "to")}
         edge["id"] = new_edge_id()       # 断片の id は必ず振り直す (衝突回避)
         edge["from"], edge["to"] = src, dst
         edges.append(edge)
+        edge_index[key] = edge
         report.added_edges += 1
 
     merged = {k: v for k, v in kg.items()
@@ -562,7 +657,9 @@ def merge_extraction(
     lost = len(edges) - len(out["edges"])
     if lost > 0:
         report.added_edges = max(0, report.added_edges - lost)
-    logger.info("merge_extraction: +%d nodes (dup %d) +%d edges (dropped %d)",
+    logger.info("merge_extraction: +%d nodes (dup %d, evidence +%d) "
+                "+%d edges (merged %d, dropped %d)",
                 report.added_nodes, report.duplicate_nodes,
-                report.added_edges, len(report.dropped_edges))
+                report.merged_evidence, report.added_edges,
+                report.merged_edges, len(report.dropped_edges))
     return out, report

@@ -1,6 +1,9 @@
 """抽出粒度 — Detailed で本当にノードが増えること (裁定 AD / AE)。
 
 設計書: production/docs/detailed-extraction-design.md
+**パイプライン側の追加抽出は抽出 v2 (裁定 AM) へ置き換わった** ので、
+その挙動は tests/test_extraction_v2.py にある。ここに残すのは抽出指示の粒度
+(裁定 AD) と、統合 `merge_extraction` の基本契約 (裁定 AE) の 2 点。
 
 ユーザー報告の症状は「Standard 19 / Detailed 19 と同数」。原因は抽出指示の
 上限 (PoC 由来の「ノード 8〜20 個」) で、概念が 20 個以下しか出ないため
@@ -17,9 +20,6 @@ Standard の帯 (20-50) に全量が収まり、Detailed と差が出なかっ�
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from cc_core.detail import build_multilevel_plan
@@ -30,9 +30,7 @@ from cc_core.normalize import (
     merge_extraction,
 )
 from cc_core.validate import validate_layout_plan
-from cc_orchestrator import pipeline
 from cc_orchestrator.agents_def import EXTRACTION_INSTRUCTIONS
-from cc_orchestrator.ingest import Doc
 
 
 # --------------------------------------------------------------- 素材
@@ -227,152 +225,3 @@ def test_merge_rejects_non_dict_input() -> None:
         merge_extraction("KG ではない", {"nodes": []})
     with pytest.raises(TypeError):
         merge_extraction(BASE, "断片ではない")
-
-
-# ==================================== 裁定 AE (パイプラインでの発動条件)
-
-
-class FakeFoundry:
-    """cc-extraction が薄い KG を返す代役 (ネットワークに出ない)。"""
-
-    def __init__(self, first: dict, fragment: dict | None = None) -> None:
-        self.first, self.fragment = first, fragment
-        self.prompts: dict[str, list[str]] = {}
-
-    def ensure_agent(self, name: str, *a: object, **k: object) -> str:
-        return name
-
-    def calls(self, agent: str) -> int:
-        return len(self.prompts.get(agent, []))
-
-    def run(self, agent: str, prompt: str, tool_executor: object = None,
-            **kwargs: object) -> str:
-        self.prompts.setdefault(agent, []).append(prompt)
-        if agent == "cc-extraction":
-            if self.calls(agent) == 1:
-                return json.dumps(self.first, ensure_ascii=False)
-            if self.fragment is None:
-                raise AssertionError("深掘りが呼ばれてはいけない run です")
-            return json.dumps(self.fragment, ensure_ascii=False)
-        if agent == "cc-projection":
-            return json.dumps({"status": "RENDER_OK", "created": 1})
-        if agent == "cc-verification":
-            return json.dumps({"verdict": "PASS", "missing": 0, "mismatched": 0,
-                               "summary": "一致"}, ensure_ascii=False)
-        raise AssertionError(f"予期しないエージェント呼び出し: {agent}")
-
-
-class FakeExecutor:
-    def __init__(self, target: str = "local") -> None:
-        self.target = target
-        self.authoritative_plan: dict | None = None
-
-    def __call__(self, name: str, args: dict) -> dict:
-        return {"success": True, "created": [], "mode": self.target,
-                "passed": True}
-
-    def tool_render_layout_plan(self, args: dict) -> dict:
-        return {"success": True, "created": []}
-
-    def export_excalidraw(self, out_path: str) -> str:
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(out_path).write_text("{}", encoding="utf-8")
-        return out_path
-
-
-@pytest.fixture
-def online_run(tmp_path, monkeypatch):
-    """online の map 経路をモックで 1 回まわす (Foundry / canvas を使わない)。"""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv(ENV_EXTRACT_MAX, raising=False)
-    monkeypatch.delenv(pipeline.ENV_EXTRACT_MIN, raising=False)
-    import datetime as dt
-
-    doc = Doc(name="研究メモ.md", source="local", modified=dt.datetime.now(),
-              text="学習率は 0.001 とした。F1 は 0.82 であった。")
-    monkeypatch.setattr(pipeline, "ingest", lambda message, paths: ([doc], "今週"))
-    monkeypatch.setattr(pipeline, "ToolExecutor", FakeExecutor)
-
-    def _run(client: FakeFoundry, **extra):
-        monkeypatch.setattr(pipeline, "FoundryAgentsV2", lambda *a, **k: client)
-        summary = pipeline.run_pipeline(
-            "今週の研究を概念地図として整理して", target="file", local_only=True,
-            layers=False, verify_causal=False, export_svg=False, learned=False,
-            **extra)
-        return summary
-    return _run
-
-
-def test_shallow_extraction_triggers_one_deep_dive(online_run) -> None:
-    """概念が閾値未満なら深掘りを **1 call だけ**足し、統合して記録する。"""
-    client = FakeFoundry(chain_kg(12), fragment=chain_kg(20, label="下位", start=100))
-    summary = online_run(client)
-
-    info = summary["extraction"]
-    assert info["expanded"] is True and info["before"] == 12
-    assert info["nodes"] == 32 and info["min"] == 25
-    assert info["merge"]["added_nodes"] == 20
-    assert summary["knowledge_graph"]["nodes"] == 32
-    assert client.calls("cc-extraction") == 2          # 初回 + 深掘り 1 回だけ
-    levels = summary["levels"]
-    assert levels["overview"]["nodes"] < levels["standard"]["nodes"] \
-        < levels["detailed"]["nodes"]
-
-
-def test_deep_dive_prompt_carries_labels_and_the_no_invention_line(online_run) -> None:
-    """深掘りプロンプトの契約: 既出ラベルを渡し、創作を禁じる。"""
-    client = FakeFoundry(chain_kg(12), fragment=chain_kg(20, label="下位", start=100))
-    online_run(client)
-
-    prompt = client.prompts["cc-extraction"][1]
-    assert "概念1" in prompt and "概念12" in prompt      # 既出は渡す
-    assert "資料に無いものを足さないでください" in prompt
-    assert "20〜40" in prompt and "evidence_span" in prompt
-    assert "研究メモ.md" in prompt                        # 資料も一緒に渡す
-
-
-def test_sufficient_extraction_does_not_deepen(online_run) -> None:
-    """十分に細かい抽出は 1 call のまま (常に 2 call にはしない)。"""
-    client = FakeFoundry(chain_kg(30))                  # fragment なし
-    summary = online_run(client)
-
-    assert summary["extraction"] == {"mode": "llm", "nodes": 30, "min": 25,
-                                     "expanded": False}
-    assert client.calls("cc-extraction") == 1
-
-
-def test_deep_dive_threshold_is_a_knob(online_run, monkeypatch) -> None:
-    """CC_EXTRACT_MIN で閾値を下げれば発動しない (呼び出し時に読む)。"""
-    monkeypatch.setenv(pipeline.ENV_EXTRACT_MIN, "10")
-    client = FakeFoundry(chain_kg(12))                  # fragment なし
-    summary = online_run(client)
-
-    assert summary["extraction"]["expanded"] is False
-    assert summary["extraction"]["min"] == 10
-    assert client.calls("cc-extraction") == 1
-
-
-def test_failed_deep_dive_still_produces_a_map(online_run) -> None:
-    """深掘りが壊れても地図は作る (粒度の底上げは地図の前提ではない)。"""
-    client = FakeFoundry(chain_kg(12), fragment={"nodes": []})   # 空の断片
-    summary = online_run(client)
-
-    assert summary["extraction"]["expanded"] is False
-    assert "error" in summary["extraction"]
-    assert summary["knowledge_graph"]["nodes"] == 12
-    assert summary["status"] == "success"
-
-
-def test_kg_file_path_never_deepens(tmp_path, monkeypatch) -> None:
-    """offline / kg_file では発動しない (資料が手元に無く、LLM も呼べない)。"""
-    monkeypatch.chdir(tmp_path)
-    path = tmp_path / "kg.json"
-    path.write_text(json.dumps(chain_kg(12), ensure_ascii=False), encoding="utf-8")
-
-    summary = pipeline.run_pipeline(
-        "今週の研究を概念地図として整理して", target="file", kg_file=str(path),
-        offline=True, layers=False, verify_causal=False, export_svg=False)
-
-    assert summary["extraction"] == {"mode": "kg_file", "nodes": 12,
-                                     "expanded": False}
-    assert summary["knowledge_graph"]["nodes"] == 12

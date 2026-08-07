@@ -94,6 +94,9 @@
 
   var state = {
     me: null,
+    // サイドバーの状態機械 (collapsed=ユーザー設定 / narrow=狭幅 /
+    // drawerOpen=狭幅でドロワーを開いている)。init で設定から作り直す。
+    sidebar: { collapsed: false, narrow: false, drawerOpen: false },
     templates: [],
     session: null,
     view: null,
@@ -442,6 +445,16 @@
     counts.textContent = LEVELS.map(function (lv) {
       return LEVEL_LABEL[lv] + " " + ((levels[lv] || {}).nodes || 0);
     }).join(" · ");
+    // 裁定 AO: Standard と Detailed が同数なのは資料側の上限であって不具合では
+    // ない、と小さく添える (水増しはしないので、説明のほうを出す)
+    var note = state.view.detail_note;
+    if (note) {
+      var span = document.createElement("span");
+      span.className = "lv-note";
+      span.textContent = note;
+      counts.appendChild(document.createElement("br"));
+      counts.appendChild(span);
+    }
   }
 
   async function setLevel(level) {
@@ -2459,6 +2472,8 @@
         closeModal(); hidePopover(); hideModeMenu(); hideInfoPopover();
         hideAccountMenu();
         if (state.pickFrom) { clearPick(); renderResult($("#result-card")); }
+        // 狭幅のドロワーは「上に乗っているもの」なので Esc で閉じる
+        if (state.sidebar.narrow && state.sidebar.drawerOpen) setCollapsed(true);
       }
     });
 
@@ -2542,23 +2557,78 @@
         && !event.target.closest(".hdr-info")) hideInfoPopover();
     });
 
-    // サイドバーの折りたたみ
+    // サイドバーの折りたたみ (狭幅ではドロワーの開閉になる)
     $("#btn-collapse").addEventListener("click", function () { setCollapsed(true); });
     $("#btn-reopen").addEventListener("click", function () { setCollapsed(false); });
+    $("#drawer-scrim").addEventListener("click", function () { setCollapsed(true); });
   }
 
   function hideModeMenu() { $("#mode-menu").hidden = true; }
 
+  // ------------------------------------------- サイドバー (狭幅対応の状態機械)
+  //
+  // 状態は 3 つだけ。**表示副作用を持たない純関数**にしてあるので、DOM 無しで
+  // そのまま検証できる (狭幅の回帰はスクリーンショットだけでは気づけない)。
+  //   collapsed  : ユーザーが選んだ既定。**localStorage に保存されるのはこれだけ**
+  //   narrow     : matchMedia(NARROW_MQ) の判定 (画面が狭いか)
+  //   drawerOpen : 狭幅でドロワーを開いているか (保存しない — 一時的な状態)
+  var NARROW_MQ = "(max-width:960px)";
+
+  function sidebarView(sb) {
+    var hidden = sb.narrow ? !sb.drawerOpen : !!sb.collapsed;
+    return { hidden: hidden, reopen: hidden, scrim: !!sb.narrow && !hidden };
+  }
+
+  // 「閉じる/開く」操作。狭幅では**ユーザー設定を汚さない** — 画面が狭いから
+  // 閉じただけなのに「サイドバーは閉じておく」を既定へ書き込むと、広い画面へ
+  // 戻ったときに勝手に閉じたままになる。
+  function sidebarToggle(sb, collapsed) {
+    if (sb.narrow) {
+      return { collapsed: sb.collapsed, narrow: true, drawerOpen: !collapsed };
+    }
+    return { collapsed: !!collapsed, narrow: false, drawerOpen: false };
+  }
+
+  // 幅の変化。狭幅へ入るときは必ず閉じた状態から始め、広幅へ戻るときは
+  // 保存済みのユーザー設定 (collapsed) がそのまま効く。
+  function sidebarResize(sb, narrow) {
+    if (!!narrow === !!sb.narrow) return sb;
+    return { collapsed: sb.collapsed, narrow: !!narrow, drawerOpen: false };
+  }
+
+  function applySidebar() {
+    var view = sidebarView(state.sidebar);
+    document.body.classList.toggle("sidebar-hidden", view.hidden);
+    $("#btn-reopen").hidden = !view.reopen;
+    $("#drawer-scrim").hidden = !view.scrim;
+  }
+
   function setCollapsed(collapsed) {
-    state.settings.collapsed = collapsed;
-    saveSettings();
-    document.body.classList.toggle("sidebar-hidden", collapsed);
-    $("#btn-reopen").hidden = !collapsed;
+    state.sidebar = sidebarToggle(state.sidebar, collapsed);
+    if (!state.sidebar.narrow) {           // 狭幅の開閉は既定を書き換えない
+      state.settings.collapsed = state.sidebar.collapsed;
+      saveSettings();
+    }
+    applySidebar();
+  }
+
+  function watchNarrow() {
+    var mq = window.matchMedia(NARROW_MQ);
+    function onChange(event) {
+      state.sidebar = sidebarResize(state.sidebar, event.matches);
+      applySidebar();
+    }
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else if (mq.addListener) mq.addListener(onChange);      // 古い Safari
+    state.sidebar = sidebarResize(state.sidebar, mq.matches);
   }
 
   async function init() {
     loadSettings();
-    setCollapsed(!!state.settings.collapsed);
+    state.sidebar = { collapsed: !!state.settings.collapsed,
+                      narrow: false, drawerOpen: false };
+    watchNarrow();                 // 起動時点で狭ければドロワーは閉じた状態
+    applySidebar();
     updateSeg();
     wire();
     try {
@@ -2575,5 +2645,14 @@
     refreshHistory();
   }
 
-  document.addEventListener("DOMContentLoaded", init);
+  if (typeof document !== "undefined") {
+    document.addEventListener("DOMContentLoaded", init);
+  }
+
+  // Node から狭幅の状態機械だけを取り出して検証するための口。ブラウザには
+  // module が無いのでこの行は何も起こさない (ビルド工程なしの方針は不変)。
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { sidebarView: sidebarView, sidebarToggle: sidebarToggle,
+                       sidebarResize: sidebarResize, NARROW_MQ: NARROW_MQ };
+  }
 })();

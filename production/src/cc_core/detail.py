@@ -235,7 +235,9 @@ def project(plan: dict[str, Any], level: str) -> dict[str, Any]:
     out["levels"] = plan.get("levels", {})
     out["aggregates"] = [a for a in plan.get("aggregates", [])
                          if any(n["id"] == a["id"] for n in out["nodes"])]
-    for key in ("gaps",):
+    # detail_note は裁定 AO の注記 (「これ以上は増やせない」)。plan 全体に
+    # 掛かる事実なので、どのレベルを取り出しても同じものが付いてくる。
+    for key in ("gaps", "detail_note"):
         if key in plan:
             out[key] = plan[key]
     return out
