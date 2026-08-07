@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 import httpx
 
+from cc_core import token_usage
 from cc_core.logging_util import get_logger
 from cc_orchestrator import FOUNDRY_PROJECT_ENDPOINT
 from cc_orchestrator.token_provider import TOKENS
@@ -61,6 +62,9 @@ class FoundryAgentsV2:
         self.endpoint = endpoint.rstrip("/")
         self.responses_url = f"{self.endpoint}/openai/v1/responses"
         self._http = httpx.Client(timeout=900)
+        # このクライアントが使ったトークンの累計 (裁定 Z)。エージェント管理
+        # (_req 経由の /agents) は課金対象の推論ではないので数えない。
+        self.usage: dict[str, int] = token_usage.blank()
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {TOKENS.token('https://ai.azure.com')}",
@@ -172,6 +176,10 @@ class FoundryAgentsV2:
                 raise RuntimeError(
                     f"responses -> {resp.status_code}: {resp.text[:400]}")
             data = resp.json()
+            # 使用量は **status を見る前**に積む。途中で打ち切られた応答でも
+            # トークンは消費されているので、失敗した回を集計から落とすと
+            # 「測ると安く見える」記録になってしまう (裁定 Z)。
+            token_usage.add_response(self.usage, data.get("usage"))
             if data.get("status") not in ("completed", None):
                 err = data.get("error") or data.get("incomplete_details")
                 raise RuntimeError(f"run {data.get('status')}: {str(err)[:300]}")

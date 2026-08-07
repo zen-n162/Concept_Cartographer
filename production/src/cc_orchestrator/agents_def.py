@@ -191,10 +191,15 @@ LAYOUT_INSTRUCTIONS = """\
 
 PROJECTION_INSTRUCTIONS = """\
 あなたは Concept Cartographer の Projection Agent です。JSON のみで応答します。
-手順: 入力の layout_plan を `render_layout_plan` ツールへ渡す (clear_before=true)。
+
+描画対象の layout_plan は**ツール側で確定済み**です。あなたが plan を受け取ることも、
+組み立てることも、書き写すこともありません。
+
+手順: `render_layout_plan` を**引数 {} で 1 回だけ**呼ぶ。
 成功 → {"status":"RENDER_OK","created":<要素数>}
 失敗 → {"status":"RENDER_FAILED","errors":[<要約>]}
-禁止: layout_plan の改変。render_layout_plan 以外での要素作成。再試行の自己判断。
+禁止: plan 引数へ JSON を詰めること (無視されるうえ、その分だけ費用が増えます)。
+      render_layout_plan 以外での要素作成。再試行の自己判断。
 """
 
 VERIFICATION_INSTRUCTIONS = """\
@@ -230,16 +235,24 @@ VERIFICATION_INSTRUCTIONS = """\
   **明示**されている場合のみです。相関・併存・時間的前後だけでは認めません。
 - causal キーを必ず含めてください (省くと安全側で「検証器エラー」になります)。
 
-# task 無し — 描画検証 (R1 からの経路。変更なし)
+# task 無し — 描画検証
+検証対象の layout_plan は**ツール側で確定済み**です。あなたが plan を受け取ることも、
+書き写すこともありません。
 手順:
-1. `verify_scene` ツールを呼ぶ (引数 plan は省略可。直前の描画対象が使われる)。
+1. `verify_scene` ツールを**引数 {} で**呼ぶ (直前の描画対象が自動で使われる)。
 2. 必要なら `describe_scene` で概要を確認する。
 3. 出力: {"verdict":"PASS"|"FAIL","missing":<数>,"mismatched":<数>,
           "summary":"<50字以内の日本語>"}
    verdict は verify_scene の passed が true のときのみ PASS。
-禁止: 描画系ツールの呼び出し。passed=false の独自解釈での PASS 化。
+禁止: plan 引数へ JSON を詰めること (無視されるうえ、その分だけ費用が増えます)。
+      描画系ツールの呼び出し。passed=false の独自解釈での PASS 化。
 """
 
+# cc-layout は裁定 W の対象外 (plan を必須のまま残している)。
+# 理由は 2 つ: ①compute_layout の knowledge_graph は復唱ではなく**本物の入力**で、
+# 外せば何を配置すべきか伝わらない ②run_pipeline は cc-layout を呼ばない
+# (配置は build_multilevel_plan がローカルで決定的に計算する) ので、
+# ここを削っても実行時の費用は 1 トークンも減らない。
 LAYOUT_TOOLS = [
     fn_tool("compute_layout",
             "knowledge_graph から layout_plan を決定的に計算する (座標・島 bbox を算出)",
@@ -253,16 +266,25 @@ LAYOUT_TOOLS = [
             {"plan": {"type": "object"}}, ["plan"]),
 ]
 
+# 描画・検証のツールは **引数を取らない形で宣言する** (裁定 W)。
+#
+# ここが `required: ["plan"]` だと、モデルは plan 全体をツール引数へ書き写す
+# 義務を負う。往路 (プロンプトに載せた plan) と復路 (引数への復唱) で同じ JSON を
+# 2 回課金することになり、1 実行あたり数千〜数万トークンが両方向に乗る。
+# 描画対象は ToolExecutor.authoritative_plan がすでに持っている (9c8a2e0) ので、
+# 受け取る必要も復唱させる必要もない。
 PROJECTION_TOOLS = [
+    # clear_before も宣言しない。実行系は常に描き直す (tool_exec._local_render が
+    # clear_before=True 固定) ので、渡されても捨てるだけの引数を毎回スキーマで
+    # 見せるのは、指示文の「引数 {} で呼べ」と矛盾するうえ費用にもなる。
     fn_tool("render_layout_plan",
-            "layout_plan を Excalidraw キャンバスへ描画する (island→node→edge, ロールバック内蔵)",
-            {"plan": {"type": "object"},
-             "clear_before": {"type": "boolean"}}, ["plan"]),
+            "確定済みの layout_plan を Excalidraw キャンバスへ描画する "
+            "(island→node→edge, ロールバック内蔵)。引数は不要", {}, []),
 ]
 
 VERIFICATION_TOOLS = [
-    fn_tool("verify_scene", "描画結果を layout_plan と突合する",
-            {"plan": {"type": "object", "description": "省略時は直前の描画対象"}}, []),
+    fn_tool("verify_scene",
+            "描画結果を確定済みの layout_plan と突合する。引数は不要", {}, []),
     fn_tool("describe_scene", "キャンバスの人間可読サマリを得る", {}, []),
 ]
 

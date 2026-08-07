@@ -148,6 +148,7 @@ class JobManager:
                 offline=bool(p.get("offline")),
                 learned=bool(p.get("learned", True)),
                 layers=bool(p.get("layers", True)),
+                test_cache_mode=bool(p.get("test_cache")),
             )
             with self._lock:
                 job.summary = summary

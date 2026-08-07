@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from cc_core import layer_assign, layers_store, verifiers
+from cc_core import layer_assign, layers_store, test_cache, token_usage, verifiers
 from cc_core.causal import apply_relation_policy
 from cc_core.detail import build_multilevel_plan, check_level_bands, project
 from cc_core.evaluation import summarize
@@ -39,7 +39,7 @@ from cc_core.validate import validate_layout_plan
 from cc_orchestrator import analysis, qa
 from cc_orchestrator.agents_def import AGENT_SPECS, MODELS
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
-from cc_orchestrator.ingest import bundle, ingest
+from cc_orchestrator.ingest import Doc, bundle, ingest, parse_window
 from cc_orchestrator.routing import RouteDecision, route
 from cc_orchestrator.tool_exec import ToolExecutor
 from cc_store import SessionStore
@@ -47,6 +47,24 @@ from cc_store import SessionStore
 logger = get_logger("cc_orchestrator.pipeline")
 
 LOCAL_BUDGET = 40000
+GRAPHS_DIR = "graphs"
+SUMMARY_PREFIX = "summary_session_"
+
+# ⑧Project / 検証のプロンプト (裁定 W)。**plan 本文を載せない**のが要点で、
+# 描画対象は ToolExecutor.authoritative_plan が持っている。ここに view_json を
+# 戻すと、往復ぶんの入力トークンがそのまま費用へ返ってくる。
+RENDER_PROMPT = (
+    "描画対象の layout_plan はツール側で確定済みです。"
+    "render_layout_plan を引数 {} で呼び、結果を "
+    '{"status": "RENDER_OK"|"RENDER_FAILED", "created": <要素数>} の '
+    "JSON で返してください。"
+)
+VERIFY_PROMPT = (
+    "直前に描画した layout_plan を検証してください。検証対象はツール側で"
+    "確定済みです。verify_scene を引数 {} で呼び、結果を "
+    '{"verdict": "PASS"|"FAIL", "missing": <数>, "mismatched": <数>, '
+    '"summary": "<50字以内>"} の JSON で返してください。'
+)
 
 ProgressFn = Callable[[str, str], None]
 """進捗フック: (stage_key, 日本語ラベル)。Web UI の進捗チェックリスト用。"""
@@ -360,6 +378,215 @@ def _validation_stages(
     return validation_info, rhetoric_info, list(report.verifier_ids)
 
 
+# ---------------------------------------- summary の永続化 + 再利用 (裁定 X)
+
+
+def summary_path(session: str, graphs_dir: str | Path = GRAPHS_DIR) -> Path:
+    return Path(graphs_dir) / f"{SUMMARY_PREFIX}{session}.json"
+
+
+def save_summary(session: str, summary: dict[str, Any],
+                 graphs_dir: str | Path = GRAPHS_DIR) -> str | None:
+    """生成結果の summary を保存する (設計 §1)。**モードに依らず常時**。
+
+    軽い JSON (KG も plan も含まない) なので毎回書いてよい。テストモードの
+    ヒット時はこれをそのまま返す素材になり、通常実行でも「あのときの地図は
+    どんな数字だったか」を後から引ける。**書けなくても生成は成功**扱い —
+    地図そのものは既に graphs/ にあるので、控えが取れないことで失わせない。
+
+    **原子的に書く** (tmp + replace)。毎回書かれるファイルであり、かつ
+    `_replay_map` が「索引にあるなら地図もある」を担保する根拠でもあるので、
+    途中で落ちて半端な JSON が残ると、再利用が黙って 1 回ぶん失われる。
+    """
+    path = summary_path(session, graphs_dir)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(summary, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        logger.warning("summary not saved: %s", type(exc).__name__)
+        return None
+    return str(path)
+
+
+def load_summary(session: str,
+                 graphs_dir: str | Path = GRAPHS_DIR) -> dict[str, Any] | None:
+    path = summary_path(session, graphs_dir)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("summary を読めません (%s)", type(exc).__name__)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _replay_map(hit: test_cache.CacheHit, *, target: str,
+                progress: ProgressFn | None) -> dict[str, Any] | None:
+    """テストキャッシュのヒットから地図を復元する (**LLM ゼロ**・設計 §1)。
+
+    素材 (summary / plan) が消えていたら None を返し、呼び出し側は通常実行へ
+    落ちる。索引に残っているというだけで「無い地図」を返さないため。
+
+    描画は target に依らず `--render` と**同じ決定的経路**を通す。local では
+    それが canvas への描き直しそのもので、file では plan がいまも描ける形か
+    どうかの確認になる (書き出し済みのファイルは前回のものを使う)。
+    """
+    session = hit.session
+    if not session:
+        return None
+    summary = load_summary(session)
+    if summary is None:
+        logger.info("summary_session_%s.json が無いため再利用できません", session)
+        return None
+
+    # 進捗は全ステージを即座に完了させる。UI のチェックリストが途中で
+    # 止まったままだと「固まった」と読まれるため (_layers_stage と同じ理由)。
+    for key, _ in STAGES:
+        _notify(progress, key)
+
+    summary = dict(summary)
+    summary["cache"] = hit.to_dict()
+    level = str(summary.get("detail_level") or "standard")
+
+    plan_file = Path((summary.get("layout") or {}).get("saved")
+                     or Path(GRAPHS_DIR) / f"layout_plan_session_{session}.json")
+    if not plan_file.exists():
+        logger.info("plan が無いため再利用できません: %s", plan_file)
+        return None
+
+    summary["cache"]["render"] = _replay_render(plan_file, level, target)
+    _record_tokens(summary, None, route_name="map", session=session, cached=True)
+    logger.info("♻ テストキャッシュから地図を再利用 session=%s age=%d分",
+                session, hit.age_min)
+    return summary
+
+
+# 再描画の結末。**表示の分岐はここで決め切る** — CLI と Web が生フィールドから
+# それぞれ判定すると、同じ summary に違う文言が出る (実際 ok と reused_files の
+# 見方が 2 画面でずれていた)。front-end は state で 1 回分岐するだけにする。
+RENDER_REDRAWN = "redrawn"        # canvas へ描き直した
+RENDER_REUSED = "reused_files"    # 書き出し済みファイルをそのまま使う
+RENDER_FAILED = "failed"          # 描き直せなかった (再利用自体は成立)
+
+
+def _replay_render(plan_file: Path, level: str, target: str) -> dict[str, Any]:
+    """保存済み plan を描き直す (`--render` と同じ決定的経路)。
+
+    local ではこれが canvas への描き直しそのもので、file では plan がいまも
+    描ける形かどうかの確認になる (書き出し済みのファイルは前回のものを使う)。
+    canvas が落ちていても**例外にしない** — 再利用そのものは成立しており、
+    描けなかったことは state=failed として残せば読み手が区別できる。
+    """
+    try:
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
+        result = ToolExecutor(target=target).tool_render_layout_plan(
+            {"plan": project(plan, level)})
+    except Exception as exc:      # canvas 未起動・plan が壊れている等
+        logger.warning("再描画に失敗: %s", type(exc).__name__)
+        return {"state": RENDER_FAILED, "level": level, "target": target,
+                "error": f"{type(exc).__name__}: {exc}"}
+    if not result.get("success"):
+        return {"state": RENDER_FAILED, "level": level, "target": target,
+                "error": "; ".join(result.get("errors", []) or [])}
+    return {"state": RENDER_REUSED if target == "file" else RENDER_REDRAWN,
+            "level": level, "target": target,
+            "elements": len(result.get("created", []) or [])}
+
+
+def _replay_answer(hit: test_cache.CacheHit) -> dict[str, Any] | None:
+    """QA / 雑談の答えを再利用する (設計 §1)。"""
+    answer = hit.entry.get("answer")
+    if not answer:
+        return None
+    summary: dict[str, Any] = {"status": "answered", "answer": answer,
+                               "cache": hit.to_dict()}
+    if hit.entry.get("sources") is not None:
+        summary["sources"] = hit.entry["sources"]
+    if hit.entry.get("qa") is not None:
+        summary["qa"] = hit.entry["qa"]
+    _record_tokens(summary, None, cached=True,
+                   route_name=str((hit.entry.get("qa") or {}).get("route") or "qa"))
+    logger.info("♻ テストキャッシュから答えを再利用 age=%d分", hit.age_min)
+    return summary
+
+
+def _answer_is_cacheable(summary: dict[str, Any], *, offline: bool) -> bool:
+    """答えを索引へ登録してよいか。**LLM を実際に使った答えだけ**を入れる。
+
+    材料不足 (`_no_material`) や offline の答えはもともと LLM 0 call なので、
+    登録しても節約にならない。それどころか `--reindex` して材料を足した直後も
+    TTL のあいだ古い「見つかりません」を返し続けることになる。
+    """
+    if offline or not summary.get("answer"):
+        return False
+    info = summary.get("qa")
+    if info is None:            # basic / vector は依頼文を直接 LLM へ投げている
+        return True
+    return int(info.get("llm_calls") or 0) > 0
+
+
+def _record_tokens(summary: dict[str, Any], client: FoundryAgentsV2 | None, *,
+                   route_name: str, session: str | None = None,
+                   cached: bool = False) -> None:
+    """使用量を summary へ載せ、jsonl へ 1 行積む (裁定 Z)。
+
+    client が無い実行 (offline / キャッシュ再利用) は**本当に 1 回も呼んで
+    いない**ので 0 call。usage を持たないクライアントは実 API を叩かない
+    テストの代役だけで、これも実費は 0 なので同じ扱いでよい。summary["tokens"]
+    は必ず埋める — キーを省くと、表示側がどちらの語彙 (0 call / 不明) でも
+    説明できない第 3 の状態ができてしまうため。
+    """
+    tokens = dict(getattr(client, "usage", None) or token_usage.blank())
+    summary["tokens"] = tokens
+    token_usage.append_log(route_name, tokens, session=session, cached=cached)
+
+
+# ------------------------------------------------- 取込キャッシュ (裁定 Y)
+
+
+def _ingest_stage(message: str, paths: list[str], *, local_only: bool,
+                  use_cache: bool) -> tuple[list[Doc], str, dict[str, Any] | None]:
+    """資料の取込。テストモードのときだけ結果を使い回す (設計 §2)。
+
+    戻り値は (docs, 期間ラベル, キャッシュ情報 or None)。**通常モードでは
+    ファイルを読みも書きもしない** — 索引が存在すること自体が本番の挙動を
+    変えないようにするため。
+    """
+    if not use_cache:
+        docs, window = ingest(message, paths)
+        return docs, window, None
+
+    _, window_label = parse_window(message)
+    key = test_cache.ingest_key(window_label, paths=paths, local_only=local_only)
+    found = test_cache.load_ingest(key)
+    if found is not None:
+        payload, age = found
+        docs = [Doc(name=str(row.get("name") or ""),
+                    source=str(row.get("source") or "local"),
+                    modified=dt.datetime.fromisoformat(str(row["modified"])),
+                    text=str(row.get("text") or ""))
+                for row in payload.get("docs") or ()
+                if row.get("modified")]
+        note = f"♻ 資料は {age} 分前の取込を再利用 ({len(docs)} 件)"
+        logger.info("%s", note)
+        return (docs, str(payload.get("window") or window_label),
+                {"hit": True, "age_min": age, "docs": len(docs), "note": note})
+
+    docs, window = ingest(message, paths)
+    test_cache.save_ingest(key, {
+        "window": window,
+        "docs": [{"name": d.name, "source": d.source,
+                  "modified": d.modified.isoformat(), "text": d.text}
+                 for d in docs]})
+    # ミスは「再利用しなかった」= 通常実行と同じなので、何も足さない
+    # (第 3 のキーを作らないほうが呼び出し側の分岐が 1 本で済む)。
+    return docs, window, None
+
+
 def run_pipeline(
     message: str,
     *,
@@ -374,6 +601,7 @@ def run_pipeline(
     offline: bool = False,
     learned: bool = True,
     layers: bool = True,
+    test_cache_mode: bool = False,
 ) -> dict[str, Any]:
     """概念地図生成の全経路。
 
@@ -398,7 +626,33 @@ def run_pipeline(
               ⑦meta (polarity 充填・provenance・投影・layer_model 刻印) はこの
               フラグに依らず常に走る — 層タグが無ければ投影は素通しなので、
               R1.5 と同じ地図が出る。
+    test_cache_mode:
+              テストモード (裁定 X)。**既定 OFF**。同じ依頼 (正規化した文言 +
+              同じ設定) の結果が TTL 内に残っていれば、LLM を 1 回も呼ばずに
+              前回の結果を返す。ヒットしたことは summary["cache"] に必ず出る
+              (黙って再利用しない)。環境変数 CC_TEST_MODE=1 でも入る。
     """
+    # ---- テストモード: 前回の結果を再利用できるか (裁定 X) ----
+    # **FoundryAgentsV2 を作る前**に判定する。生成した時点で Azure 認証と
+    # ensure_agents (ネットワーク) が走るので、「ヒット時は LLM ゼロ」を
+    # 保証できる場所はここしかない。既定 OFF なので通常実行は素通りする
+    # (索引ファイルすら作らない)。
+    use_cache = test_cache.enabled(test_cache_mode)
+    cache_key: str | None = None
+    if use_cache:
+        pre = route(message)
+        cache_key = test_cache.make_key(
+            message, level=detail_level or pre.detail_level or "standard",
+            target=target, layers=layers, learned=learned,
+            local_only=local_only, kg_file=kg_file, paths=paths)
+        hit = test_cache.lookup(cache_key)
+        if hit is not None:
+            replayed = (_replay_map(hit, target=target, progress=progress)
+                        if hit.kind == "map" else _replay_answer(hit))
+            if replayed is not None:
+                return replayed
+            logger.info("再利用の素材が揃わないため通常実行します")
+
     # offline では FoundryAgentsV2 を生成しない。生成だけで Azure 認証と
     # エージェント確保 (ensure_agents) が走り、閉域・テストで失敗するため。
     client = None if offline else FoundryAgentsV2()
@@ -424,6 +678,12 @@ def run_pipeline(
         summary.update(handler(message, client=client, offline=offline))
         summary["status"] = "answered"
         logger.info("routed to %s (no map generation)", decision.route)
+        _record_tokens(summary, client, route_name=decision.route)
+        if cache_key and _answer_is_cacheable(summary, offline=offline):
+            test_cache.record(cache_key, "qa", message=message,
+                              answer=summary.get("answer"),
+                              sources=summary.get("sources"),
+                              qa=summary.get("qa"))
         return summary
 
     # offline の kg_file 必須は**地図生成の話**。QA 経路は保存済みの索引だけで
@@ -447,13 +707,16 @@ def run_pipeline(
         # チェックリストが途中で止まって見えないよう、ここで通知する)
         _notify(progress, "extract")
     else:
-        docs, window = ingest(message, paths or [])
+        docs, window, ingest_cache = _ingest_stage(
+            message, paths or [], local_only=local_only, use_cache=use_cache)
         summary["ingest"] = {
             "window": window,
             "local_files": [{"name": d.name, "modified": d.modified.strftime("%Y-%m-%d")}
                             for d in docs],
             "workiq": "disabled" if local_only else "enabled",
         }
+        if ingest_cache is not None:
+            summary["ingest"]["cache"] = ingest_cache
         lang_note = ""
         if decision.language == "en":
             lang_note = "\nラベルは英語で出力してください。"
@@ -645,10 +908,14 @@ def run_pipeline(
     # ---- ⑧ Project: 既定レベルを描画 + 検証 (FAIL 時 1 回再試行) ----
     _notify(progress, "render")
     view = project(plan, level)
-    view_json = json.dumps(view, ensure_ascii=False)
     # 描画・検証の対象はここで確定させる。エージェント経路では LLM が plan を
     # 復唱してツールへ渡すが、復唱は静かに壊れる【実測: 島の欠落で
     # RENDER_FAILED】ため、ツール側はこの確定 plan だけを使う。
+    #
+    # 確定させた以上、**プロンプトに plan 本文を載せる理由が無い** (裁定 W)。
+    # 載せると往路 (プロンプト) と復路 (ツール引数への復唱) で同じ JSON を
+    # 2 回課金することになり、それが再試行のぶんだけ積み上がる。エージェントに
+    # 要るのは「ツールを呼べ」という指示だけで、何を描くかはツール側が知っている。
     executor.authoritative_plan = view
     verdict: dict[str, Any] = {}
     if offline:
@@ -674,17 +941,14 @@ def run_pipeline(
     else:
         for attempt in (1, 2):
             render_status = extract_json(client.run(
-                "cc-projection", "この layout_plan を描画:\n" + view_json,
-                tool_executor=executor))
+                "cc-projection", RENDER_PROMPT, tool_executor=executor))
             summary["projection"] = render_status
             if render_status.get("status") != "RENDER_OK":
                 raise RuntimeError(f"projection failed: {render_status}")
 
             _notify(progress, "verify")
             verdict = extract_json(client.run(
-                "cc-verification",
-                "直前に描画した layout_plan を検証してください。plan:\n" + view_json,
-                tool_executor=executor))
+                "cc-verification", VERIFY_PROMPT, tool_executor=executor))
             summary["verification"] = verdict
             if verdict.get("verdict") == "PASS":
                 break
@@ -712,6 +976,15 @@ def run_pipeline(
     summary["kpi"] = summarize(view, [])
     summary["status"] = "success" if verdict.get("verdict") == "PASS" else "verify_failed"
     summary["view"] = {"local_canvas": "http://127.0.0.1:3000"}
+    _record_tokens(summary, client, route_name="map", session=session)
+
+    # summary の永続化は**常時** (設計 §1)。テストモードの素材であると同時に、
+    # 「あのときの地図の数字」を後から引ける控えでもある。
+    save_summary(session, summary)
+    if cache_key and summary["status"] == "success":
+        # 検証まで通った実行だけを登録する。FAIL の地図を再利用させると、
+        # 直したはずの不具合が「再利用」で復活して見える (設計 §1「ミス時」)。
+        test_cache.record(cache_key, "map", message=message, session=session)
     return summary
 
 

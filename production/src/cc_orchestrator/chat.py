@@ -50,6 +50,13 @@
   python -m cc_orchestrator.chat --relearn
   python -m cc_orchestrator.chat "今週の研究を..." --no-learned
 
+  # テストモード (同じ文言の再実行で LLM を呼ばない。既定 OFF)
+  python -m cc_orchestrator.chat "今週の研究を..." --test-cache
+  CC_TEST_MODE=1 python -m cc_orchestrator.chat "今週の研究を..."
+
+  # トークン使用量の集計 (LLM 不要)
+  python -m cc_orchestrator.chat --token-report
+
   # エージェント登録/更新
   python -m cc_orchestrator.chat --setup-agents
 """
@@ -86,7 +93,9 @@ from cc_core.learning import (
     update_from_edit,
 )
 from cc_core.svg_export import write_svg
+from cc_core import test_cache, token_usage
 from cc_store import SessionStore, rebuild_index
+from cc_orchestrator import pipeline
 from cc_orchestrator.foundry_v2 import FoundryAgentsV2
 from cc_orchestrator.pipeline import ensure_agents, run_pipeline
 from cc_orchestrator.tool_exec import ToolExecutor
@@ -141,6 +150,37 @@ def _print_sources(s: dict) -> None:
 
 
 def _print_summary(s: dict) -> None:
+    """結果表示。再利用の告知は**冒頭**、使用量は**最終行** (コスト設計 §1/§3)。"""
+    _print_cache_banner(s)
+    _summary_body(s)
+    line = token_usage.format_line(s.get("tokens"))
+    if line:
+        print(line)
+
+
+def _print_cache_banner(s: dict) -> None:
+    """テストモードで再利用したことを**必ず**出す (黙って再利用しない)。
+
+    ここが出ないまま古い結果が返ると、直したはずの挙動が直っていないように
+    見えて、キャッシュの存在ごと信用を失う。
+    """
+    cache = s.get("cache") or {}
+    if not cache.get("hit"):
+        return
+    print()
+    print(cache.get("note") or "♻ 前回の結果を再利用 (テストモード)")
+    render = cache.get("render") or {}
+    state = render.get("state")
+    if state == pipeline.RENDER_REDRAWN:
+        print(f"   🖼  canvas に再描画しました "
+              f"({render.get('elements')} 要素 / {render.get('level')})")
+    elif state == pipeline.RENDER_REUSED:
+        print("   💾 出力ファイルは前回のものがそのまま使えます")
+    elif state == pipeline.RENDER_FAILED:
+        print(f"   ⚠ 再描画できませんでした: {str(render.get('error', ''))[:90]}")
+
+
+def _summary_body(s: dict) -> None:
     print()
     if s.get("status") == "answered":
         print(f"💬 [{s['routing']['route']} 経路] {s['routing']['rationale']}")
@@ -159,6 +199,8 @@ def _print_summary(s: dict) -> None:
     if "window" in ing:
         wq = "Work IQ 有効" if ing.get("workiq") == "enabled" else "ローカルのみ"
         print(f"📄 取込 ({ing.get('window')} / {wq})")
+        if (ing.get("cache") or {}).get("hit"):
+            print(f"   {ing['cache'].get('note')}")
         for f in ing.get("local_files", []):
             print(f"   - {f['name']}  [local, {f['modified']}]")
     kgs = s.get("knowledge_graph", {})
@@ -672,7 +714,18 @@ def main() -> None:
                     help="ギャップの「次の一手」を型別に出して exports/ へ保存")
     ap.add_argument("--no-llm", action="store_true",
                     help="--gap-report で LLM 提案を付けず finding だけで作る")
+    # --- トークン節約 (コスト設計書 §1・§3)。テストモードは既定 OFF ---
+    ap.add_argument("--test-cache", action="store_true",
+                    help="テストモード: 同じ依頼は前回の結果を再利用する "
+                         "(LLM を 1 回も呼ばない。既定 OFF / CC_TEST_MODE=1 でも可)")
+    ap.add_argument("--token-report", action="store_true",
+                    help="トークン使用量を日別に集計して表示 (LLM 不要)")
     args = ap.parse_args()
+
+    # --- 使用量の集計 (LLM 呼び出しゼロ) ---
+    if args.token_report:
+        print(token_usage.format_report(token_usage.daily_report()))
+        return
 
     # --- オフライン評価 (LLM 呼び出しゼロ: 裁定 O) ---
     if args.offline_eval or args.gold_status or args.gold_queue is not None:
@@ -793,13 +846,15 @@ def main() -> None:
         return
 
     def run_once(message: str) -> None:
-        print(f"⏳ 実行中 (target={args.target})…")
+        mode = " / テストモード" if test_cache.enabled(args.test_cache) else ""
+        print(f"⏳ 実行中 (target={args.target}{mode})…")
         try:
             summary = run_pipeline(
                 message, target=args.target, paths=args.path, kg_file=args.kg,
                 local_only=args.local_only, detail_level=args.level,
                 verify_causal=not args.no_causal_verify, export_svg=not args.no_svg,
-                learned=not args.no_learned, layers=not args.no_layers)
+                learned=not args.no_learned, layers=not args.no_layers,
+                test_cache_mode=args.test_cache)
         except Exception as exc:
             print(f"❌ 失敗: {type(exc).__name__}: {exc}", file=sys.stderr)
             return

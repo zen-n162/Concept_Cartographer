@@ -113,7 +113,9 @@
     knownSessions: {},     // 履歴にある session id (QA の出典を開けるか判定する)
     settings: {
       level: "standard", causalVerify: true, localOnly: false,
-      collapsed: false, learned: true, layers: true
+      collapsed: false, learned: true, layers: true,
+      // テストモード (裁定 X)。**既定 OFF**。入れたときだけ前回の結果を再利用する
+      testCache: false
     }
   };
 
@@ -441,7 +443,8 @@
         local_only: state.settings.localOnly,
         causal_verify: state.settings.causalVerify,
         learned: state.settings.learned !== false,
-        layers: state.settings.layers !== false
+        layers: state.settings.layers !== false,
+        test_cache: state.settings.testCache === true
       });
       pollJob(res.job_id, message);
     } catch (err) {
@@ -529,6 +532,9 @@
     var bubble = el("div", "bubble-ai", summary.answer || "");
     var sources = summary.sources || [];
     var info = summary.qa || null;
+    // 再利用の告知は答えの**前**に置く (黙って再利用しない: 裁定 X)
+    var reuse = cacheNotice(summary);
+    if (reuse) bubble.insertBefore(reuse, bubble.firstChild);
     if (!sources.length && !info) return bubble;
 
     var foot = el("div", "qa-foot");
@@ -679,6 +685,10 @@
     var view = state.view;
     var summary = state.summary || {};
 
+    // --- 再利用の告知 (裁定 X)。**黙って再利用しない** ---
+    var reuse = cacheNotice(summary);
+    if (reuse) card.appendChild(reuse);
+
     // --- サマリ行 ---
     var islands = {};
     view.nodes.forEach(function (n) { islands[n.community_id] = true; });
@@ -743,6 +753,10 @@
       card.appendChild(lchips);
     }
 
+    // --- 使用量チップ (裁定 Z)。測れなかった実行には出さない ---
+    var tchip = tokenChip(summary.tokens);
+    if (tchip) card.appendChild(tchip);
+
     // --- タブ ---
     var gaps = view.gaps || [];
     var tabs = el("div", "tabs");
@@ -770,6 +784,52 @@
     span.appendChild(el("b", null, value));
     span.appendChild(document.createTextNode(" " + label));
     return span;
+  }
+
+  /* テストモードで前回の結果を再利用したときの告知 (裁定 X)。
+   * 「黙って再利用しない」が原則なので、結果より**前**に、目立つ形で出す。
+   * これが出ないまま古い地図が返ると、直したはずの挙動が直っていないように
+   * 見えて、キャッシュの存在ごと信用を失う。 */
+  function cacheNotice(summary) {
+    var cache = (summary || {}).cache;
+    if (!cache || !cache.hit) return null;
+    var box = el("div", "chip-line");
+    box.appendChild(el("span", "chip-sm", cache.note
+      || ("♻ 前回の結果を再利用 (テストモード / " + (cache.age_min || 0) + " 分前)")));
+    // 判定はサーバ (pipeline._replay_render) が state に畳んである。ここで
+    // 生フィールドから読み直すと、同じ summary に CLI と違う文言が出る
+    var render = cache.render || {};
+    if (render.state === "redrawn") {
+      box.appendChild(el("span", "chip-sm grey",
+        "canvas へ再描画 " + (render.elements || 0) + " 要素"));
+    } else if (render.state === "reused_files") {
+      box.appendChild(el("span", "chip-sm grey", "出力ファイルは前回のまま"));
+    } else if (render.state === "failed") {
+      box.appendChild(el("span", "chip-sm", "⚠ 再描画できませんでした"));
+    }
+    return box;
+  }
+
+  /* トークン使用量のチップ (裁定 Z)。**測れなかった実行には何も出さない** —
+   * 0 と表示すると「使っていない」と読めるが、実際は「測っていない」なので。 */
+  function tokenChip(tokens) {
+    if (!tokens || typeof tokens.calls !== "number") return null;
+    var line = el("div", "chip-line");
+    if (!tokens.calls) {
+      line.appendChild(el("span", "chip-sm green", "LLM 呼び出しなし (0 call)"));
+      return line;
+    }
+    if (tokens.unknown && tokens.unknown >= tokens.calls) {
+      line.appendChild(el("span", "chip-sm grey",
+        "トークン: 不明 (LLM " + tokens.calls + " call)"));
+      return line;
+    }
+    line.appendChild(el("span", "chip-sm", "入力 "
+      + (tokens.input || 0).toLocaleString() + " token"));
+    line.appendChild(el("span", "chip-sm", "出力 "
+      + (tokens.output || 0).toLocaleString() + " token"));
+    line.appendChild(el("span", "chip-sm grey", "LLM " + tokens.calls + " call"));
+    return line;
   }
 
   function learnedCount(report) {
@@ -1993,6 +2053,14 @@
       + "別モデルで検証します。矢印 (因果) と ⚡ (矛盾) はこの検証を通った"
       + "ものだけに点きます。切ると R1.5 と同じ、語彙証拠だけの地図になります "
       + "(生成は少し速くなります)。"));
+    box.appendChild(checkboxField(
+      "テストモード — 同じ依頼は前回の結果を再利用 (既定 OFF)", "testCache"));
+    box.appendChild(el("p", "gap-src",
+      "同じ文言・同じ設定でもう一度送ると、前回の結果をそのまま返します "
+      + "(LLM を 1 回も呼ばないので費用がかかりません)。再利用したときは結果に "
+      + "「♻ 前回の結果を再利用」と必ず出ます。試行錯誤で同じ依頼を繰り返すとき"
+      + "だけ入れてください — 資料を更新しても新しい地図にならなくなります "
+      + "(6 時間で期限切れ)。"));
     box.appendChild(checkboxField("過去の修正から学習を適用 (既定 ON)", "learned"));
     box.appendChild(el("p", "gap-src",
       "「学習」はモデルの再学習ではありません。あなたが直した用語辞書・除外"

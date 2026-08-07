@@ -86,6 +86,8 @@ class JobRequest(BaseModel):
     offline: bool = False
     learned: bool = True     # 過去の修正からの学習を適用するか (§8.1)
     layers: bool = True      # 多層分析 (R2a 設計書 §10)。M7 で既定 ON
+    # テストモード (裁定 X)。**既定 OFF** — 明示的に入れたときだけ再利用する
+    test_cache: bool = False
 
 
 class GapDecisionRequest(BaseModel):
@@ -266,6 +268,7 @@ def create_app() -> FastAPI:
             "offline": req.offline,
             "learned": req.learned,
             "layers": req.layers,
+            "test_cache": req.test_cache,
             "kg_file": _resolve_kg_file(req.kg_file) if req.kg_file else None,
         }
         # offline の kg_file 必須は**地図生成の話**。R2b の QA 経路は保存済みの

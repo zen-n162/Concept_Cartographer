@@ -75,8 +75,14 @@ python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m cc_orchestrator.chat --gap-report 20260807_143804
 ./.venv/bin/python -m cc_orchestrator.chat --gap-report 20260807_143804 --no-llm  # finding だけ
 
+# テストモード (同じ依頼の再実行で LLM を呼ばない。既定 OFF)
+./.venv/bin/python -m cc_orchestrator.chat "今週の研究を…" --test-cache
+
+# トークン使用量の集計 (LLM 呼び出しゼロ)
+./.venv/bin/python -m cc_orchestrator.chat --token-report
+
 # テスト
-./.venv/bin/pytest -m "not e2e"      # 608 件
+./.venv/bin/pytest -m "not e2e"      # 652 件
 ```
 
 ### 問いかけ（R2b の QA 経路）
@@ -100,6 +106,60 @@ LLM が引かなかった場合は「何を見て答えたか」（起点の概�
 描画先は `--target local`（Excalidraw MCP）が既定。ACA 到達前は
 `--target file` で MCP なしに `.excalidraw` / SVG を生成でき、この経路でも
 可変詳細度と独立検証が成立する（計画 §3-2 の fallback 要件）。
+
+## コストを抑えて使う（`docs/cost-saving-design.md`）
+
+入力トークンが出力の約 10 倍かかる【実測】。**入力を減らす手段を 1 か所に集めた**。
+
+### 何もしなくても効いているもの（裁定 W・恒久）
+
+描画と検証のプロンプトから **layout_plan 本文を外した**。描画対象は
+`ToolExecutor.authoritative_plan` が持っているので、エージェントに渡す必要も、
+ツール引数へ復唱させる必要もない（`render_layout_plan` / `verify_scene` は
+**引数を取らない宣言**にしてある）。実測で描画・検証の 2 段合計
+**73,082 → 314 文字（99.6% 減）**。往路（プロンプト）と復路（復唱）の両方が消える。
+
+### 明示的に選ぶもの
+
+| 手段 | 効果 | 使いどころ |
+|---|---|---|
+| `--test-cache` / `CC_TEST_MODE=1` | 同じ依頼の 2 回目が **LLM 0 call** | 同じ文言で試行錯誤するとき |
+| `--kg <file>` + `offline=True` | 抽出も検証も飛ばす（**LLM 0 call**） | 保存済み KG から描き直すだけのとき |
+| `--render` / `--switch` | もともと **LLM 0 call**（決定的コード） | 詳細度の切替・canvas への描き直し |
+| `--no-layers` | 文分割〜主張検証の多層分析ぶん（数十 call）を省く | 構造だけ見たいとき |
+| `--no-causal-verify` | 因果の独立検証 1 call/エッジを省く | 語彙証拠だけで足りるとき |
+| `CC_MODEL_EXTRACTION=gpt-5.6-luna` 等 | テスト時にモデルを引き下げる | 挙動確認だけしたいとき |
+| `CC_QA_MAX_CALLS`（既定 6） | 1 問あたりの QA 呼び出し上限 | 大域 QA が重いとき |
+| `CC_ZONE_MAX_SENTENCES` 等の件数 knob | 各段へ渡す件数を絞る | 資料が多いとき |
+
+### テストモードの約束
+
+- **既定 OFF**。`--test-cache`・`CC_TEST_MODE=1`・Web の設定モーダルで明示したときだけ働く
+- ヒットしたら **必ず**「♻ 前回の結果を再利用（テストモード / n 分前 / session X）」を出す。
+  黙って古い結果を返さない
+- ヒット時は `FoundryAgentsV2` を**生成もしない**（認証もネットワークも走らない）。
+  `target=local` なら保存済み plan を `--render` と同じ決定的経路で canvas へ描き直す
+- 期限は `CC_TEST_CACHE_TTL_MIN`（既定 360 分）。**検証を通った実行だけ**を登録する
+- 資料の取込もテストモード中だけ再利用する（裁定 Y）。文言を変えて試すときは
+  抽出以降だけが課金される
+- 索引は `logs/test_cache/`。消しても次の実行で作り直される（派生キャッシュ）
+
+### 使った量を見る（裁定 Z）
+
+実行ごとに `summary["tokens"]` に実数が入り、CLI は最終行に
+`🔢 トークン: 入力 n / 出力 m (LLM k call)` を出す。全実行が
+`logs/token_usage.jsonl` に 1 行ずつ積まれ、`--token-report` で日別に集計できる。
+
+```
+   日付                入力       出力   LLM call   実行  再利用
+   2026-08-07         4,432        183          4      2       1
+```
+
+Responses API 応答の `usage.input_tokens` / `usage.output_tokens` を読む
+（**実応答で確認済み**）。取れなかった回は **「不明」** と表示する — 0 を入れると
+「使っていない」と読めてしまうため、「使っていない」と「測れていない」は区別する。
+単価は未判明なので掛け算はしない。判明したら `CC_PRICE_IN` / `CC_PRICE_OUT`
+（1000 トークンあたりの円）を入れると円換算が付く。
 
 ## Web アプリ（`docs/webapp-design.md`）
 
