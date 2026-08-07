@@ -68,3 +68,8 @@ run.txt
 # --- 実データの知識グラフ (社内文書名・逐語引用を含む) ---
 poc/graphs/
 production/graphs/
+
+# --- ローカル専用 (GitHub 公開に含めない: ユーザー指定 2026-08-07) ---
+PRODUCTION_PLAN.md
+run.txt
+.claude/
