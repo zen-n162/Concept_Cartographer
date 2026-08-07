@@ -22,6 +22,19 @@ R2b で local / global / hybrid を追加した (R2b 設計書 §2)。R3 で ont
 そのため新しい cue の照合は MAP_CUES と BASIC_CUES の**後ろ**に置いてある —
 「概念地図として整理して」のような地図生成の依頼が、文中に「なぜ」が入って
 いるだけで QA へ流れることが無いようにするため。
+
+**裁定 T (経路判定の衝突解消)**: 裁定 N には 1 つだけ穴があった。「概念地図」が
+**テーマ名そのもの**である研究では、「動的概念地図とリアルタイム概念地図の
+関係は?」という純然たる質問が、話題の名前に地図語が入っているというだけで
+map へ倒れてしまう。そこで、次の 3 条件が揃ったときだけ QA が MAP_CUES に勝つ:
+
+  1. LOCAL_CUES / GLOBAL_CUES が当たっている (問いの形をしている)
+  2. 入力が疑問形である (末尾が「?」「？」、または「教えて」「ですか」を含む)
+  3. **地図生成の動詞が無い** (MAP_VERB_CUES — 「整理して」「作って」等)
+
+3 が要で、地図語が「作れ」という依頼の一部なのか話題の名前なのかを分ける。
+依頼文には必ず動詞が付く (「概念地図を作って」) 一方、話題の名前として現れる
+ときは付かない (「概念地図の関係は?」)。裁定 N の既存判定は 1 件も動かない。
 """
 
 from __future__ import annotations
@@ -74,6 +87,13 @@ GLOBAL_CUES = [
 # --- 複合: local の材料と global の要約を両方使う (R2b 設計書 §2) ---
 # local と global の cue が両方当たった場合もここへ倒す。
 HYBRID_CUES = ["比較して", "比べて", "整理した上で", "踏まえた上で"]
+# --- 裁定 T: 地図語が「依頼」であることを示す動詞 ---
+# これが有れば、疑問形でも地図生成の依頼として扱う (map が勝つ)。
+MAP_VERB_CUES = ["整理して", "作成", "作って", "描いて", "生成",
+                 "地図として", "地図に", "マップ化"]
+# 疑問形の合図。末尾記号は endswith、語は部分一致で見る。
+QUESTION_MARKS = ("?", "？")
+QUESTION_CUES = ["教えて", "ですか"]
 # 詳細度の指定
 LEVEL_CUES = {
     "overview": ["概観", "俯瞰", "ざっくり", "全体像", "overview", "大まか", "簡単に"],
@@ -115,6 +135,17 @@ def _hit(text: str, cues: list[str]) -> str | None:
         if c in low or c in text:
             return c
     return None
+
+
+def is_question(message: str) -> bool:
+    """疑問形か (裁定 T の条件 2)。
+
+    末尾の「?」「？」だけでは日本語の問いを取りこぼす (「〜を教えて」で終わる
+    のが普通なので)。逆に「教えて」「ですか」を末尾に限ると
+    「〜を教えてください」が漏れるため、この 2 語は部分一致で見る。
+    """
+    text = message.strip()
+    return text.endswith(QUESTION_MARKS) or bool(_hit(text, QUESTION_CUES))
 
 
 def parse_detail_level(message: str) -> str | None:
@@ -172,17 +203,33 @@ def route(
     vector_hit = _hit(message, VECTOR_CUES)
     has_window = "既定" not in window_label
 
-    if map_hit:
+    # ---- R2b: QA 経路 (裁定 N: 明示的な手がかりがあるときだけ) ----
+    # 照合をここまで繰り上げたのは裁定 T の判定に必要だから。倒す順序
+    # (map → basic → QA → vector) は下のまま 1 つも変えていない。
+    local_hit = _hit(message, LOCAL_CUES)
+    global_hit = _hit(message, GLOBAL_CUES)
+    hybrid_hit = _hit(message, HYBRID_CUES)
+
+    # 裁定 T: 地図語がテーマ名でしかない疑問文を QA へ逃がす。
+    # 「動的概念地図とリアルタイム概念地図の関係は?」は問いであって依頼ではない。
+    qa_beats_map = bool(map_hit) and bool(local_hit or global_hit) \
+        and is_question(message) and not _hit(message, MAP_VERB_CUES)
+
+    if map_hit and not qa_beats_map:
         return RouteDecision("map", detail, language, window_label, tags,
                              f"地図生成の明示語「{map_hit}」")
     if basic_hit and not vector_hit and len(message) <= 40:
         return RouteDecision("basic", detail, language, window_label, tags,
                              f"雑談・ヘルプ語「{basic_hit}」で短文")
 
-    # ---- R2b: QA 経路 (裁定 N: 明示的な手がかりがあるときだけ) ----
-    local_hit = _hit(message, LOCAL_CUES)
-    global_hit = _hit(message, GLOBAL_CUES)
-    hybrid_hit = _hit(message, HYBRID_CUES)
+    if qa_beats_map:
+        why = (f"局所「{local_hit}」" if local_hit else f"大域「{global_hit}」")
+        route_name = ("hybrid" if (hybrid_hit or (local_hit and global_hit))
+                      else ("local" if local_hit else "global"))
+        return RouteDecision(route_name, detail, language, window_label, tags,
+                             f"地図語「{map_hit}」は話題の名前で、"
+                             f"{why}を問う疑問形のため QA 経路 (裁定 T)")
+
     if hybrid_hit or (local_hit and global_hit):
         why = (f"複合の語「{hybrid_hit}」" if hybrid_hit
                else f"局所「{local_hit}」と大域「{global_hit}」の両方")

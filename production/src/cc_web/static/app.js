@@ -105,6 +105,7 @@
     tab: "map",
     verdicts: {},
     satisfaction: 0,
+    offline: null,         // GET /api/evaluation/offline の直近の結果 (全セッション横断)
     editMode: false,
     pickFrom: null,        // 「関係を追加」の 1 個目に選んだノード id
     files: [],             // inbox の一覧 (チップのメタ情報に使う)
@@ -1711,6 +1712,160 @@
     body.appendChild(el("p", "gap-src",
       "関係の評価は地図上の線をクリックして送れます。評価は logs/evaluation.jsonl に"
       + "ラベルと ID だけが記録されます (本文は記録しません)。"));
+
+    // --- オフライン評価 (R2c 設計書 §1.2)。コーパス横断なので毎回取り直す ---
+    var offline = el("div", "off-eval");
+    body.appendChild(offline);
+    if (state.offline) renderOfflineEval(offline, state.offline);
+    else offline.appendChild(el("p", "off-next-label", "オフライン評価を読み込み中…"));
+    loadOfflineEval(offline);
+  }
+
+  // -------------------------------------- オフライン評価 (R2c 設計書 §1.2)
+  //
+  // 上の満足度・チップが「この地図」の話なのに対し、ここは**溜まった判定を
+  // 正解セットとして扱った累積の KPI** で、全セッション横断。同じタブに
+  // 並べるが数え方が違うので、見出しで別物だと分かるようにしてある。
+  var OFFLINE_METRICS = [
+    ["relation_accuracy", "関係正答率"],
+    ["causal_precision", "因果精度"],
+    ["gap_usefulness", "ギャップ有用率"],
+    ["coverage", "網羅率"]
+  ];
+
+  function meterBar(value, cls) {
+    var node = el("div", "bar bar-wide");
+    var fill = el("span", cls);
+    var ratio = typeof value === "number" ? Math.max(0, Math.min(1, value)) : 0;
+    fill.style.width = Math.round(ratio * 100) + "%";
+    node.appendChild(fill);
+    return node;
+  }
+
+  function offlineMetricRow(grid, label, metric) {
+    var value = metric.value;
+    var na = typeof value !== "number";
+    grid.appendChild(el("span", "off-name", label));
+    grid.appendChild(el("span", "off-value" + (na ? " na" : ""),
+      na ? "—" : value.toFixed(2)));
+    // 目標のある指標だけ達成/未達で色を変える。網羅率は目標が無いので既定色
+    grid.appendChild(meterBar(value, metric.meets_target === true ? "hit"
+      : metric.meets_target === false ? "miss" : null));
+    grid.appendChild(el("span", "off-goal",
+      (typeof metric.target === "number" ? "目標 " + metric.target.toFixed(2) : "目標 —")
+      + " ・ n=" + (metric.n || 0)));
+  }
+
+  function renderOfflineEval(section, report) {
+    clear(section);
+    var head = el("div", "off-head");
+    head.appendChild(icon("chart-dots-3", "ic-16"));
+    head.appendChild(el("span", "off-title", "オフライン評価 (全セッション累積)"));
+    head.appendChild(el("span", "chip-sm grey", "LLM 呼び出しゼロ"));
+    section.appendChild(head);
+
+    var metrics = report.metrics || {};
+    var cov = metrics.coverage || {};
+    var counts = metrics.labels || {};
+    if (report.empty) {
+      // 判定 0 件はエラーではない。集め方を書いて次の一手を示す (受け入れ基準 2)
+      section.appendChild(el("p", "off-empty", report.hint));
+    } else {
+      var grid = el("div", "off-grid");
+      OFFLINE_METRICS.forEach(function (pair) {
+        offlineMetricRow(grid, pair[1], metrics[pair[0]] || {});
+      });
+      section.appendChild(grid);
+      // 判定はあるのに 1 件も分母に入らない状態を黙って «—» で済ませない。
+      // 「集めたのに何も出ない」はバグに見えるので、なぜ 0 なのかを言う
+      if (counts.total && !counts.matched) {
+        section.appendChild(el("p", "off-empty",
+          "判定は " + counts.total + " 件ありますが、いまの知識グラフの関係とは"
+          + " 1 件も一致しませんでした ("
+          + (counts.missing ? "削除済み・別セッションの関係への判定 "
+            + counts.missing + " 件" : "")
+          + (counts.user_origin ? " / ユーザーが編集した関係 "
+            + counts.user_origin + " 件は分母から除外" : "")
+          + ")。下のボタンから、いま地図にある関係を判定していってください。"));
+      }
+    }
+
+    var prog = el("div", "off-prog");
+    [["関係", cov.gold_relations], ["ギャップ", cov.gold_gaps]].forEach(function (pair) {
+      var p = pair[1] || {};
+      var item = el("div", "off-prog-item");
+      item.appendChild(el("span", null, "正解セット " + pair[0]));
+      item.appendChild(meterBar(p.value, p.meets_target ? "hit" : null));
+      item.appendChild(el("b", null, (p.n || 0) + " / " + (p.target || 0)));
+      item.title = p.meets_target ? "目標に到達しています"
+        : "目標まであと " + (p.remaining || 0) + " 件";
+      prog.appendChild(item);
+    });
+    section.appendChild(prog);
+
+    var next = report.next_unlabeled;
+    var foot = el("div", "off-next");
+    if (next) {
+      var btn = el("button", "btn-sm", "次の未評価の関係を開く");
+      btn.type = "button";
+      btn.addEventListener("click", function () { openNextUnlabeled(next); });
+      foot.appendChild(btn);
+      foot.appendChild(el("span", "off-next-label",
+        next.from_label + " → " + next.to_label
+        + " ・ 未判定 " + (report.unlabeled || 0) + " 本"));
+    } else {
+      foot.appendChild(el("span", "off-next-label",
+        "未判定の関係はありません"));
+    }
+    section.appendChild(foot);
+    section.appendChild(el("p", "gap-src",
+      "logs/evaluation.jsonl と tests/gold/*.jsonl の判定を、いまの知識グラフと"
+      + "突き合わせた値です。ユーザーが編集・追加した関係は分母から除きます。"
+      + "因果精度の causal_ok は gold ファイルにしかありません。"));
+  }
+
+  async function loadOfflineEval(section) {
+    try {
+      var report = await api("/api/evaluation/offline");
+      state.offline = report;
+      // タブを切り替えた後に届いた応答は捨てる (section は既に外れている)
+      if (section.isConnected) renderOfflineEval(section, report);
+    } catch (err) {
+      clear(section);
+      section.appendChild(el("p", "gap-src",
+        "オフライン評価を読み込めませんでした: " + err.message));
+    }
+  }
+
+  /* 「次の未評価の関係を開く」= 地図タブで該当エッジのポップオーバーを開く。
+   * キューは全セッション横断なので、別セッションの関係なら先に開き直す。 */
+  async function openNextUnlabeled(next) {
+    try {
+      if (next.session && next.session !== state.session) {
+        if (!state.knownSessions[next.session]) {
+          toast("この関係は履歴に無いセッションのものです: " + next.session);
+          return;
+        }
+        await openSession(next.session, null, null);
+      }
+      state.tab = "map";
+      renderResult($("#result-card"));
+      var wrap = $(".map-wrap");
+      var target = wrap && wrap.querySelector(
+        '[data-edge-id="' + cssEscape(next.edge_id) + '"]');
+      if (!target) {
+        // overview では集約に畳まれて線が出ないことがある。黙って何も起きない
+        // より、なぜ開けないかを言う
+        toast("この関係は今の詳細度では表示されていません (詳細度を上げてください)");
+        return;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      var rect = target.getBoundingClientRect();
+      showEdgePopover(next.edge_id, rect.left + rect.width / 2,
+        rect.top + rect.height / 2);
+    } catch (err) {
+      toast(err.message);
+    }
   }
 
   // ============================================================ モーダル

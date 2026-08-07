@@ -158,6 +158,53 @@ def test_map_cue_still_wins_over_qa_cues() -> None:
     assert route("原因を整理して").route == "map"
 
 
+# ------------------------------------------- 裁定 T (経路判定の衝突解消)
+#
+# 「概念地図」がテーマ名そのものである研究では、純然たる質問が話題の名前に
+# 地図語が入っているだけで map へ倒れてしまう。疑問形で、かつ地図生成の
+# **動詞が無い**ときだけ QA が勝つ。裁定 N の既存判定は 1 件も動かさない。
+
+
+@pytest.mark.parametrize("message,expected", [
+    # (a) 裁定 T の狙い: テーマ名に地図語が入った疑問形
+    ("動的概念地図とリアルタイム概念地図の関係は?", "local"),
+    ("動的概念地図とリアルタイム概念地図の関係は？", "local"),   # 全角の ?
+    ("概念地図と知識グラフの関係を教えて", "local"),
+    ("概念マップの全体像はどこにありますか？", "global"),
+    ("概念地図の全体像と個別の関係を教えて", "hybrid"),
+    # (b)(c) 地図生成の依頼は不変 — 動詞があるので map のまま
+    ("今週の研究を概念地図として整理して", "map"),
+    ("概念地図を作って", "map"),
+    ("概念地図を作成してください", "map"),
+    ("概念地図に描いて", "map"),
+    ("概念地図とリアルタイム地図の関係を図にして", "map"),
+    # 疑問形でも「作って」があれば依頼 (地図語 + 動詞 + ? の組み合わせ)
+    ("概念地図の関係を整理してくれますか?", "map"),
+    # (d) 地図語が無い問いは元から QA。裁定 T を通らない
+    ("研究の全体像をまとめて", "global"),
+])
+def test_arbitration_t_question_form_beats_map_cue(message: str, expected: str) -> None:
+    assert route(message).route == expected
+
+
+def test_arbitration_t_needs_all_three_conditions() -> None:
+    """3 条件が揃わなければ map のまま (裁定 N を壊さないための歯止め)。"""
+    # 疑問形だが local/global の手がかりが無い -> 従来どおり map
+    assert route("概念地図とは何ですか").route == "map"
+    # local の手がかりはあるが疑問形ではない -> map
+    assert route("概念地図の関係について概念地図にして").route == "map"
+    # 疑問形 + local だが地図生成の動詞がある -> map
+    assert route("この概念地図の原因を整理してもらえますか?").route == "map"
+
+
+def test_arbitration_t_rationale_explains_itself() -> None:
+    """なぜ QA へ倒したかが説明文に残る (経路判定は後から検証できること)。"""
+    decision = route("動的概念地図とリアルタイム概念地図の関係は?")
+    assert decision.route == "local"
+    assert "裁定 T" in decision.rationale
+    assert not decision.used_llm       # ルールだけで決める (LLM を呼ばない)
+
+
 def test_routes_and_dispatch_table_agree() -> None:
     """ROUTES / ANSWER_ROUTES / ディスパッチ表 / qa.ANSWERERS が食い違わない。"""
     assert set(ROUTES) == set(ANSWER_ROUTES) | {"map"}

@@ -40,6 +40,11 @@
   python -m cc_orchestrator.chat "私の研究の全体像をまとめて"            # global
   python -m cc_orchestrator.chat "全体像を踏まえた上で比較して"          # hybrid
 
+  # オフライン評価 (R2c。溜まった判定を正解セットとして KPI を測る。LLM 不要)
+  python -m cc_orchestrator.chat --offline-eval
+  python -m cc_orchestrator.chat --gold-status
+  python -m cc_orchestrator.chat --gold-queue 20
+
   # 過去の修正からの学習
   python -m cc_orchestrator.chat --show-learned
   python -m cc_orchestrator.chat --relearn
@@ -55,9 +60,10 @@ import argparse
 import json
 import os
 import sys
+import unicodedata
 from pathlib import Path
 
-from cc_core import layers_store
+from cc_core import layers_store, offline_eval
 from cc_core.community import expand_aggregate
 from cc_core.detail import project
 from cc_core.editing import (
@@ -378,6 +384,153 @@ def _print_search(query: str, graphs_dir: str | Path = layers_store.GRAPHS_DIR,
                 print(f"      根拠: {evidence[:70]}")
 
 
+# ------------------------------------------ オフライン評価 (R2c 設計書 §1)
+
+
+def _bar(value: float | None, width: int = 12) -> str:
+    """進捗バー。None (まだ測れない) は空バーで、0.0 と見た目を分ける。"""
+    if value is None:
+        return "·" * width
+    filled = max(0, min(width, round(value * width)))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _pad(text: str, width: int) -> str:
+    """表示幅で左詰めする。
+
+    `f"{s:<12s}"` は**文字数**で数えるので、全角が混じった表が崩れる
+    (「関係正答率」5 文字 = 10 桁、「因果精度」4 文字 = 8 桁)。東アジア
+    文字幅 W/F を 2 桁として数え直す。
+    """
+    shown = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+    return text + " " * max(0, width - shown)
+
+
+def _metric_line(name: str, metric: dict) -> str:
+    value = metric.get("value")
+    target = metric.get("target")
+    mark = {True: "✅", False: "⚠️", None: "—"}[metric.get("meets_target")]
+    shown = f"{value:.3f}" if isinstance(value, (int, float)) else "  —  "
+    goal = f"目標 {target:.2f}" if isinstance(target, (int, float)) else "目標  —  "
+    return (f"   {_pad(name, 16)} {shown}  {goal}  {_pad(mark, 3)} "
+            f"n={metric.get('n', 0):<4d} {_bar(value)}")
+
+
+def _print_offline_eval(report: dict, saved: Path | None) -> None:
+    """--offline-eval: 表を出して JSON を保存する (LLM 呼び出しゼロ・裁定 O)。
+
+    判定 0 件でも落とさず「集め方」を出す (受け入れ基準 2)。使い始めに
+    数字が無いのは正常な状態で、エラーにすると壊れていると誤解されるため。
+    """
+    src = report["sources"]
+    m = report["metrics"]
+    print(f"📊 オフライン評価  ({report['generated_at']} / LLM 呼び出しゼロ)")
+    print(f"   材料: セッション {src['sessions']} / 関係 {src['relations']} 本"
+          f" / gold ファイル {len(src['gold_files'])}")
+
+    if report.get("empty"):
+        print("\n   ⚠ まだ判定がありません")
+        print(f"\n   {report.get('hint')}\n")
+        if saved:
+            print(f"💾 {saved}")
+        return
+
+    lab = m["labels"]
+    print(f"   判定: {lab['total']} 件 (クリック {lab['click']} / gold {lab['gold']})"
+          f"  → 有効 {lab['matched']}"
+          f" (ユーザー編集で除外 {lab['user_origin']} / 現在の地図に無い {lab['missing']})")
+    if lab["total"] and not lab["matched"]:
+        # 「集めたのに全部 — 」はバグに見える。なぜ分母が 0 なのかを言う
+        print("   ⚠ 判定はありますが、いまの知識グラフの関係と 1 件も一致しません"
+              " (削除済み・別セッションの関係への判定です)")
+    print()
+    print(_metric_line("関係正答率", m["relation_accuracy"]))
+    print(_metric_line("因果精度", m["causal_precision"]))
+    print(_metric_line("ギャップ有用率", m["gap_usefulness"]))
+    print(_metric_line("網羅率", m["coverage"])
+          + f"  ({m['coverage']['judged_relations']}/{m['coverage']['total_relations']})")
+    note = m["causal_precision"].get("note")
+    if note:
+        print(f"   ※ {note}")
+    print()
+    _print_gold_progress(m["coverage"])
+    nxt = report.get("next_unlabeled")
+    if nxt:
+        print(f"\n   次に判定するとよい関係: {nxt['from_label']} →[{nxt['glyph']}]→ "
+              f"{nxt['to_label']}  [{nxt['session']} / {nxt['edge_id']}]")
+        print(f"   (未判定はあと {report['unlabeled']} 本。"
+              "一覧は --gold-queue <件数>)")
+    if saved:
+        print(f"\n💾 {saved}")
+
+
+def _print_gold_progress(coverage: dict) -> None:
+    """正解セットの到達度 (関係 150 / ギャップ 50 — 裁定 O)。"""
+    print("   正解セット進捗 (裁定 O)")
+    for name, p in (("関係", coverage["gold_relations"]),
+                    ("ギャップ", coverage["gold_gaps"])):
+        status = "✅ 達成" if p["meets_target"] else f"あと {p['remaining']} 件"
+        print(f"     {_pad(name, 10)} {p['n']:>4d} / {p['target']:<4d} "
+              f"{_bar(p['value'])}  {status}")
+
+
+def _print_gold_status(report: dict) -> None:
+    """--gold-status: 正解セットがどこまで育ったか (裁定 O の進捗表示)。"""
+    src, cov = report["sources"], report["metrics"]["coverage"]
+    lab = report["metrics"]["labels"]
+    print(f"🥇 正解セットの進捗  ({report['generated_at']})")
+    print(f"   gold ディレクトリ: {src['gold_dir']}"
+          + (f"  ファイル {', '.join(src['gold_files'])}" if src["gold_files"]
+             else "  (ファイルなし — クリック評価のみ)"))
+    print(f"   クリック評価 {lab['click']} 件 / gold ファイル {lab['gold']} 件")
+    print()
+    _print_gold_progress(cov)
+    print(f"\n   未判定の関係: {report['unlabeled']} 本 "
+          f"(全 {src['relations']} 本中)")
+    if report.get("empty"):
+        print(f"\n   {report.get('hint')}")
+    else:
+        print("   次に付ける分は --gold-queue <件数> で出せます "
+              "(glyph 層化サンプリング)")
+
+
+def _print_gold_queue(rows: list[dict], total_unlabeled: int) -> None:
+    """--gold-queue: 未判定の関係を層化サンプリングして作業キューにする。"""
+    if not rows:
+        print("🥇 未判定の関係はありません (すべて判定済みか、地図がまだありません)")
+        return
+    by_glyph: dict[str, int] = {}
+    for row in rows:
+        by_glyph[row["glyph"]] = by_glyph.get(row["glyph"], 0) + 1
+    mix = " / ".join(f"{g}={n}" for g, n in sorted(by_glyph.items()))
+    print(f"🥇 ラベル付けキュー {len(rows)} 件 (未判定 {total_unlabeled} 本から "
+          f"glyph 層化サンプリング)")
+    print(f"   構成: {mix}")
+    print()
+    for row in rows:
+        print(f"   → {row['from_label']} —[{row['glyph']}"
+              + (f": {row['label']}" if row["label"] else "")
+              + f"]→ {row['to_label']}")
+        print(f"      [{row['session']} / {row['edge_id']}]")
+    print(f"\n   判定の書き方: {offline_eval.GOLD_DIR}/README.md")
+    print('   例: {"from_label": "…", "to_label": "…", "verdict": "correct", '
+          '"causal_ok": true}')
+
+
+def _run_offline_eval(args: argparse.Namespace) -> None:
+    """--offline-eval / --gold-status / --gold-queue の入口 (LLM 不要)。"""
+    queue_size = args.gold_queue if args.gold_queue else 5
+    report = offline_eval.run_offline_eval(queue_size=queue_size)
+    if args.gold_queue:
+        _print_gold_queue(report["queue"], report["unlabeled"])
+        return
+    if args.gold_status:
+        _print_gold_status(report)
+        return
+    saved = offline_eval.save_report(report)
+    _print_offline_eval(report, saved)
+
+
 def _run_edits(args: argparse.Namespace) -> None:
     """--edit / --edit-file / --revert-edit を適用し plan を再構成する。"""
     session, graphs_dir = _session_of(args.plan)
@@ -474,7 +627,19 @@ def main() -> None:
                     help="コーパス索引を再構築して件数を表示 (LLM 不要)")
     ap.add_argument("--search", default=None, metavar="QUERY",
                     help="全セッション横断で概念・関係を検索 (LLM 不要)")
+    # --- R2c オフライン評価 (R2c 設計書 §1・裁定 O)。すべて LLM 不要 ---
+    ap.add_argument("--offline-eval", action="store_true",
+                    help="溜まった判定から KPI を測り logs/offline_eval_{日付}.json へ保存")
+    ap.add_argument("--gold-status", action="store_true",
+                    help="日本語正解セットの進捗 (関係 150 / ギャップ 50)")
+    ap.add_argument("--gold-queue", type=int, default=None, metavar="K",
+                    help="未判定の関係を K 件 glyph 層化サンプリングして一覧")
     args = ap.parse_args()
+
+    # --- オフライン評価 (LLM 呼び出しゼロ: 裁定 O) ---
+    if args.offline_eval or args.gold_status or args.gold_queue is not None:
+        _run_offline_eval(args)
+        return
 
     if args.layers_summary:
         _print_layers_summary(args.layers_summary)

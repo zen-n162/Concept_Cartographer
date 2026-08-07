@@ -30,6 +30,7 @@ from cc_core.evaluation import EvaluationSession, EvaluationStore
 from cc_core.gaps import GapDecisionError
 from cc_core.learning import cue_warnings, load_learned, summarize as summarize_learned
 from cc_core.logging_util import get_logger
+from cc_core.offline_eval import GOLD_DIR, run_offline_eval
 from cc_orchestrator.pipeline import offline_needs_kg_file
 from cc_web import account, jobs as jobs_mod, sessions as sessions_mod
 from cc_web.jobs import JobManager
@@ -448,6 +449,21 @@ def create_app() -> FastAPI:
             raise _bad(str(exc)) from exc
         EvaluationStore(EVAL_LOG).append(ev)
         return {"ok": True}
+
+    @app.get("/api/evaluation/offline")
+    def api_offline_evaluation() -> dict[str, Any]:
+        """オフライン評価 (R2c 設計書 §1.2)。CLI `--offline-eval` と同じ JSON。
+
+        **LLM を 1 回も呼ばない** (裁定 O) ので JobManager へは回さず、その場で
+        読んで返す。材料は溜まった判定と graphs/ のファイルだけで、重いのは
+        セッション数ぶんの JSON 読み込みに限られる。
+
+        判定が 0 件でも 200 で返す (`empty: true` + `hint`)。「まだ測っていない」
+        は異常ではないので、404 や 500 にすると使い始めが壊れて見える
+        (受け入れ基準 2)。
+        """
+        return run_offline_eval(eval_log=EVAL_LOG, gold_dir=GOLD_DIR,
+                                graphs_dir=sessions_mod.GRAPHS_DIR)
 
     # -------------------------------------------------- 履歴
     @app.get("/api/history")

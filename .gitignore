@@ -14,6 +14,11 @@ logs/
 exports/
 *.log
 
+# --- 日本語正解セット (R2c 裁定 O) ---
+# gold の判定行は研究内容そのもの (概念名・出典) を含みうるので既定で追跡しない。
+# 書き方 (README.md) と雛形 (*.jsonl.example) だけをリポジトリに置く。
+production/tests/gold/*.jsonl
+
 # --- Python ---
 __pycache__/
 *.pyc

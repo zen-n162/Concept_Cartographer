@@ -66,8 +66,13 @@ python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m cc_orchestrator.chat "SuperPCAとスーパーピクセルの関係は?"
 ./.venv/bin/python -m cc_orchestrator.chat "私の研究の全体像をまとめて"
 
+# オフライン評価 (R2c。溜まった判定を正解セットとして KPI を測る。LLM 呼び出しゼロ)
+./.venv/bin/python -m cc_orchestrator.chat --offline-eval    # 指標 + logs/offline_eval_{日付}.json
+./.venv/bin/python -m cc_orchestrator.chat --gold-status     # 正解セットの進捗 (関係150/ギャップ50)
+./.venv/bin/python -m cc_orchestrator.chat --gold-queue 20   # 次に判定する 20 件 (glyph 層化)
+
 # テスト
-./.venv/bin/pytest -m "not e2e"      # 515 件
+./.venv/bin/pytest -m "not e2e"      # 559 件
 ```
 
 ### 問いかけ（R2b の QA 経路）

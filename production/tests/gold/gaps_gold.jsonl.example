@@ -1,0 +1,2 @@
+{"gap_id": "gap-isolated-c003", "session": "20260807_143804", "decision": "confirm", "labeled_by": "nakamura.zen@qst.go.jp", "ts": "2026-08-07T15:10:00", "note": "確かに線量評価と細胞応答をつなぐ記述が資料に無い。次の実験で埋めるべき"}
+{"gap_id": "gap-discourse-c011", "session": "20260807_143804", "decision": "dismiss", "labeled_by": "nakamura.zen@qst.go.jp", "ts": "2026-08-07T15:12:00", "note": "手法の記述が無いのは正しいが、これは既報の追試なので欠落ではない"}
