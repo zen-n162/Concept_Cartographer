@@ -27,5 +27,33 @@ if [ "$warn" = "1" ]; then
   echo "  → 使う場合は scripts/start_canvas.sh と scripts/start_gateway.sh を先に起動してください。"
 fi
 
-echo "Concept Cartographer: http://127.0.0.1:${PORT}"
+# 古いサーバが残っていると bind に失敗し、**修正したはずのコードが動かない**まま
+# 前のプロセスが応答し続ける【実測 2026-08-07: 3 時間前に起動したサーバが旧仕様で
+# 生成し、修正が効いていないように見えた】。掴んでいるのが自分のアプリなら置き換える。
+STALE_PIDS="$(lsof -ti "tcp:${PORT}" 2>/dev/null || true)"
+if [ -n "$STALE_PIDS" ]; then
+  for pid in $STALE_PIDS; do
+    if ps -p "$pid" -o command= 2>/dev/null | grep -q "cc_web.app"; then
+      started="$(ps -p "$pid" -o lstart= 2>/dev/null | sed 's/^ *//')"
+      echo "既存の Web サーバを停止します (pid $pid / 起動 $started)"
+      kill "$pid" 2>/dev/null || true
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.3
+      done
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    else
+      echo "エラー: ポート ${PORT} を別のアプリ (pid $pid) が使用中です。" >&2
+      echo "  CC_WEB_PORT=8091 ./scripts/start_web.sh のように別ポートで起動してください。" >&2
+      exit 1
+    fi
+  done
+  sleep 0.5
+fi
+
+# 起動したコードの版数を出す (古いサーバ問題を目視で気づけるように)
+REV="$(git -C "$PROD_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+DIRTY=""
+git -C "$PROD_DIR" diff --quiet 2>/dev/null || DIRTY=" +未コミットの変更あり"
+echo "Concept Cartographer: http://127.0.0.1:${PORT}  [code ${REV}${DIRTY}]"
 exec ./.venv/bin/uvicorn cc_web.app:app --host 127.0.0.1 --port "$PORT"

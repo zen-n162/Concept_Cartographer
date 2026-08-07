@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,24 @@ from cc_web.jobs import JobManager
 logger = get_logger("cc_web.app")
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+_STARTED_AT = dt.datetime.now().replace(microsecond=0).isoformat()
+
+
+def _code_revision() -> str:
+    """動作中コードの git 版数 (取れなければ "unknown")。
+
+    古いサーバが残っていると修正が効かないまま応答し続けるため、
+    /healthz から外形的に確認できるようにする。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).resolve().parents[2]),
+            capture_output=True, text=True, timeout=3, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return out.stdout.strip() or "unknown"
 INBOX_DIR = "inbox"
 EVAL_LOG = "logs/evaluation.jsonl"
 ALLOWED_UPLOAD_EXT = {".pdf", ".docx", ".txt", ".md"}
@@ -189,7 +209,10 @@ def create_app() -> FastAPI:
     # -------------------------------------------------- 基本
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
-        return {"ok": True}
+        # code は「いま動いているサーバのコード版数」。古いサーバが残っていると
+        # 修正が効かないまま応答し続けるため、外から確認できるようにする
+        # 【実測 2026-08-07: 3 時間前起動のサーバが旧仕様で生成していた】
+        return {"ok": True, "code": _code_revision(), "started_at": _STARTED_AT}
 
     @app.get("/")
     def index() -> FileResponse:

@@ -77,7 +77,11 @@ def session(client) -> str:
 # ------------------------------------------------------------------ ① 基本
 
 def test_healthz(client) -> None:
-    assert client.get("/healthz").json() == {"ok": True}
+    body = client.get("/healthz").json()
+    assert body["ok"] is True
+    # 動作中コードの版数と起動時刻を返す (古いサーバの発見用)
+    assert body["code"]                      # git 版数 or "unknown"
+    assert body["started_at"].startswith("20")
 
 
 def test_index_html_is_served(client) -> None:
