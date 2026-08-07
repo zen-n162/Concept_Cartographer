@@ -63,7 +63,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from cc_core import layers_store, offline_eval
+from cc_core import gap_report as gap_report_mod, layers_store, offline_eval
 from cc_core.community import expand_aggregate
 from cc_core.detail import project
 from cc_core.editing import (
@@ -531,6 +531,40 @@ def _run_offline_eval(args: argparse.Namespace) -> None:
     _print_offline_eval(report, saved)
 
 
+def _gap_report_target(value: str) -> tuple[str, Path]:
+    """`--gap-report` の引数を (セッション ID, graphs ディレクトリ) にする。
+
+    plan のパスでもセッション ID でも受ける — 他のフラグは plan を渡す流儀
+    (`--gap-list`) とセッションを渡す流儀 (`--layers-summary`) が混在していて、
+    どちらで来ても通るほうが迷わない。
+    """
+    if value.endswith(".json") or "/" in value or "\\" in value:
+        return _session_of(value)
+    return value, Path(layers_store.GRAPHS_DIR)
+
+
+def _run_gap_report(args: argparse.Namespace) -> None:
+    """--gap-report: 型別の「次の一手」を Markdown で出して保存する (設計 §2.1)。
+
+    LLM は**付いていれば使う**だけで、無くても finding は全部出る
+    (受け入れ基準 3)。az トークンが無い環境で落ちないよう、クライアントの
+    生成に失敗したら黙って finding のみに切り替える。
+    """
+    session, graphs_dir = _gap_report_target(args.gap_report)
+    store = SessionStore(graphs_dir)
+    client = None
+    if not args.no_llm:
+        try:
+            client = FoundryAgentsV2()
+        except Exception as exc:      # トークン無し・設定無しは異常ではない
+            print(f"ℹ️  LLM 提案なし ({type(exc).__name__}) — finding のみで作ります")
+
+    report = gap_report_mod.build_gap_report(session, store, client=client)
+    print(gap_report_mod.to_markdown(report))
+    saved = gap_report_mod.save_report(report)
+    print(f"💾 {saved['md']}\n💾 {saved['json']}")
+
+
 def _run_edits(args: argparse.Namespace) -> None:
     """--edit / --edit-file / --revert-edit を適用し plan を再構成する。"""
     session, graphs_dir = _session_of(args.plan)
@@ -634,11 +668,20 @@ def main() -> None:
                     help="日本語正解セットの進捗 (関係 150 / ギャップ 50)")
     ap.add_argument("--gold-queue", type=int, default=None, metavar="K",
                     help="未判定の関係を K 件 glyph 層化サンプリングして一覧")
+    ap.add_argument("--gap-report", default=None, metavar="PLAN|SESSION",
+                    help="ギャップの「次の一手」を型別に出して exports/ へ保存")
+    ap.add_argument("--no-llm", action="store_true",
+                    help="--gap-report で LLM 提案を付けず finding だけで作る")
     args = ap.parse_args()
 
     # --- オフライン評価 (LLM 呼び出しゼロ: 裁定 O) ---
     if args.offline_eval or args.gold_status or args.gold_queue is not None:
         _run_offline_eval(args)
+        return
+
+    # --- ギャップレポート (R2c 設計書 §2.1)。LLM は任意 ---
+    if args.gap_report:
+        _run_gap_report(args)
         return
 
     if args.layers_summary:

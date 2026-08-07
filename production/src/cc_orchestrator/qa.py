@@ -35,6 +35,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from cc_core import layers_store
 from cc_core.editing import normalize_label
 from cc_core.logging_util import get_logger
 from cc_orchestrator import analysis
@@ -210,6 +211,20 @@ def _edge_document(edge: Mapping[str, Any]) -> str:
     return ""
 
 
+def _documents_of(store: SessionStore, session: str) -> dict[str, str]:
+    """セッションの document_id -> ファイル名 対応表 (裁定 V)。
+
+    サイドカーが無い / 対応表が無い過去セッションでは空 dict。呼び出し側は
+    `resolve_document` を通すので、その場合は生の id がそのまま表示される。
+    """
+    try:
+        return layers_store.documents_of(store.load_layers(session))
+    except Exception as exc:      # 層が読めなくても QA そのものは続ける
+        logger.warning("qa: layers を読めません session=%s err=%s",
+                       session, type(exc).__name__)
+        return {}
+
+
 def _node_documents(edges: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     """ノード -> 出典文書。**接続する関係の出典が 1 つに定まるときだけ**返す。
 
@@ -279,6 +294,7 @@ def local_material(store: SessionStore, terms: Sequence[str], *,
 
         seed_ids = set(sub.get("seeds") or ())
         docs = _node_documents(sub["edges"])
+        names = _documents_of(store, session)      # 裁定 V
         labels: dict[str, str] = {}
         for node in sub["nodes"]:
             nid = str(node.get("id") or "")
@@ -289,9 +305,10 @@ def local_material(store: SessionStore, terms: Sequence[str], *,
             ref = f"n:{session}:{nid}"
             material.context["concepts"].append(
                 {"ref": ref, "label": label, "session": session})
-            material.sources[ref] = {"kind": "node", "label": label,
-                                     "session": session,
-                                     "document_id": docs.get(nid, "")}
+            material.sources[ref] = {
+                "kind": "node", "label": label, "session": session,
+                "document_id": layers_store.resolve_document(
+                    docs.get(nid, ""), names)}
             if nid in seed_ids:
                 material.seeds.append(ref)
         for edge in sub["edges"]:
@@ -310,7 +327,9 @@ def local_material(store: SessionStore, terms: Sequence[str], *,
             material.sources[ref] = {
                 "kind": "edge",
                 "label": f"{src} →（{GLYPH_JA.get(glyph, glyph)}）→ {dst}",
-                "session": session, "document_id": _edge_document(edge)}
+                "session": session,
+                "document_id": layers_store.resolve_document(
+                    _edge_document(edge), names)}
     logger.info("qa local material seeds=%d concepts=%d relations=%d sessions=%d",
                 len(material.seeds), len(material.context["concepts"]),
                 len(material.context["relations"]), len(material.sessions))

@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from cc_core import editing, layers_store
+from cc_core import editing, gap_report, layers_store
 from cc_core.community import LEVEL_ORDER, expand_aggregate
 from cc_core.detail import project
 from cc_core.evaluation import summarize
@@ -273,6 +273,29 @@ def decide_gap(session: str, gap_id: str, decision: str,
     gap = apply_decision(plan, gap_id, decision, user_id=user_id)
     save_plan(session, plan)
     return {"gap": gap, "usefulness": usefulness_rate(plan)}
+
+
+def build_gap_report(session: str) -> dict[str, Any]:
+    """ギャップレポートを作って exports/ に保存し、JSON を返す (設計 §2.1)。
+
+    CLI の `--gap-report` と**同じ cc_core の関数**を呼ぶ薄いラッパ。
+    LLM クライアントは作れたら使う。az トークンが無い環境で 500 を返すのは
+    誤り — finding だけのレポートは正常な成果物なので、静かに縮退させる。
+    """
+    from cc_store import SessionStore
+
+    client = None
+    try:
+        from cc_orchestrator.foundry_v2 import FoundryAgentsV2
+        client = FoundryAgentsV2()
+    except Exception as exc:
+        logger.info("gap report: LLM 提案なし (%s)", type(exc).__name__)
+
+    report = gap_report.build_gap_report(
+        session, SessionStore(GRAPHS_DIR), client=client)
+    saved = gap_report.save_report(report)
+    report["saved"] = {k: str(v) for k, v in saved.items()}
+    return report
 
 
 # ------------------------------------------------------------------ 展開

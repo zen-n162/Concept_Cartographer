@@ -1020,6 +1020,27 @@ def run_community_summary(run: RunFn, members: Sequence[str],
 # ------------------------------------------------------------------ 入口
 
 
+def _attach_documents(doc: dict[str, Any], kg: dict[str, Any],
+                      docs: Sequence[Any] | None) -> None:
+    """裁定 V: document_id -> ファイル名の対応表をサイドカーに載せる。
+
+    **生成時にしか作れない**表であることが要点。取込がどのファイルを読んだかを
+    知っているのはこの瞬間だけで (`docs` は保存されない)、あとから kg を見ても
+    Work IQ の不透明な id しか残っていない。名前の出所は 2 つ:
+
+      - `docs`      … 取込が実際に開いたファイル名
+      - `source_files` … 抽出エージェントが報告した資料名 (Work IQ 経路)
+
+    解決できなかった id は表に載らない (= 従来どおり生の id が表示される)。
+    """
+    names = [name for name, _ in (_doc_fields(d) for d in docs or ())]
+    names += [str(f) for f in (kg or {}).get("source_files") or [] if f]
+    table = layers_store.build_documents(
+        layers_store.collect_document_ids(doc, kg), names)
+    if table:
+        doc[layers_store.DOCUMENTS_KEY] = table
+
+
 def analyze(
     run: RunFn,
     *,
@@ -1051,6 +1072,7 @@ def analyze(
         announce("claims")
         report.notes.append("ゾーニングできる文が無い (資料本文も根拠スパンも空)")
         doc["stats"] = layers_store.compute_stats(doc, sentences=0, llm_calls=0)
+        _attach_documents(doc, kg, docs)
         return doc, report
 
     announce("zone")
@@ -1062,4 +1084,5 @@ def analyze(
     doc["ontology"] = ontology
     doc["stats"] = layers_store.compute_stats(
         doc, sentences=len(sentences), llm_calls=report.llm_calls)
+    _attach_documents(doc, kg, docs)
     return doc, report

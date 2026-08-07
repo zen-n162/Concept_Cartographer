@@ -71,8 +71,12 @@ python3.11 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/python -m cc_orchestrator.chat --gold-status     # 正解セットの進捗 (関係150/ギャップ50)
 ./.venv/bin/python -m cc_orchestrator.chat --gold-queue 20   # 次に判定する 20 件 (glyph 層化)
 
+# ギャップレポート (R2c。型別の「次の一手」。既定で外部アクセスなし)
+./.venv/bin/python -m cc_orchestrator.chat --gap-report 20260807_143804
+./.venv/bin/python -m cc_orchestrator.chat --gap-report 20260807_143804 --no-llm  # finding だけ
+
 # テスト
-./.venv/bin/pytest -m "not e2e"      # 559 件
+./.venv/bin/pytest -m "not e2e"      # 608 件
 ```
 
 ### 問いかけ（R2b の QA 経路）
@@ -200,6 +204,8 @@ src/
 │  ├ verifiers.py    ◆ 3検証器と合成・閾値3分岐・rejection_log
 │  ├ layers_store.py ◆ layers_session サイドカーの I/O・nanopub_id 採番
 │  ├ gaps.py         ★◆ ギャップ検出 3型（構造/言説/因果）・confirm/dismiss・有用率
+│  ├ gap_report.py   ● 型別の「次の一手」・閉世界推薦（裁定 R）・Markdown/JSON 出力
+│  ├ offline_eval.py ● オフライン評価・日本語正解セットの突合（裁定 O/P）
 │  ├ evaluation.py   ★ オンライン評価（v3 §7.2.1 の2系統ラベル）・KPI 集計
 │  ├ svg_export.py   ★ ヘッドレス SVG（ブラウザ不要）
 │  ├ layout.py       日本語幅推定グリッド（上位層の属性を保持するよう改修）
@@ -220,7 +226,7 @@ src/
 │  └ static/        index.html（アイコンはインライン SVG スプライト）・app.css・app.js
 └ cc_tools/          FastMCP（ACA デプロイ単位）
 ```
-★ = R1 の新規実装 / ◆ = R2a（知識モデルの多層化）の新規実装
+★ = R1 の新規実装 / ◆ = R2a（知識モデルの多層化）の新規実装 / ● = R2c（評価・推薦）の新規実装
 
 ## まだ実装していないもの（計画どおり R2b 以降）
 
@@ -353,6 +359,66 @@ R1.5 より前のセッションは関係ポリシー適用**前**の KG を原�
 各候補は「何を見たか（grounds）」「どの規則で判断したか（warrant）」を
 レコード自身に持つ。ギャップの確定は人が行う（裁定 8）ので、判断材料を
 候補と同じ場所に置いてある。
+
+### ギャップレポート（R2c。型別の「次の一手」）
+
+ギャップ検出は「ここに穴がある」までしか言わない。レポートはその先の
+「**その穴はもう自分の資料で埋まるのか**」を、全セッションを横断して調べる。
+
+| 型 | finding（決定的・LLM 不要） |
+|---|---|
+| 構造 | 断絶の両側の代表概念で横断検索し、**両方に触れている自分の資料**を挙げる |
+| 言説 | 欠けている手法（Method / Experiment）の記述を**持っている他セッション**を挙げる |
+| 因果 | 却下ログの理由 + 機序手がかり語で根拠スパンを横断検索し、機序記述の有無を示す |
+
+各項目は 2 段構え。**finding は store を検索して得た事実**で、後から人が同じ
+検索をして確かめられる。**suggestion は LLM の 1 文提案**で任意（上限 5 call、
+無ければキーごと省略）。この 2 つを混ぜないのが要点で、「3 件あった」と
+「あるかもしれない」を同じ段落に置くと、検証できない文が検証できる文の
+信用を借りてしまう。画面でも提案側だけ地色で囲って区別する。
+
+**情報源の優先順位（裁定 R）** — 既定は ① のみで、**外部ネットワークへは
+一切出ない**（socket 層で監視するテストで担保）:
+
+1. 自分のセッション群（`cc_store`）— 常に使う。決定的
+2. approved-literature KB — `CC_KB_AGENT` にエージェント名があるときだけ。
+   無ければ**試みもせず**レポートに `kb: 未接続` と書く
+3. 公開 API（arXiv）— `CC_EXTERNAL_RECS=1` のときだけ。送るのは**概念ラベルだけ**、
+   User-Agent を明示し、全送信を `logs/external_queries.jsonl` に記録する。
+   記録できない状態では**送らない**（何を外に出したか復元できなくなるため）
+
+出力は `exports/gap_report_{session}.json` と同 `.md`。
+
+### エージェント編成（裁定 S）
+
+v4 実装仕様 §8.2 は 11 の役割を挙げるが、R2 は **`pipeline.py` の決定的
+オーケストレーションを継続**する。11 役割は現行 6 エージェント + 決定的
+コードで全て充足しており、役割ごとにエージェントを立てる利得より、
+LLM に順序を任せることで**再現性が落ちる**損失のほうが大きいため。
+
+| v4 §8.2 の役割 | 現行の実装 | 種別 |
+|---|---|---|
+| Ingest | `cc-extraction`（Work IQ ツール）+ `ingest.py` | エージェント + コード |
+| Concept 抽出 | `cc-extraction` | エージェント |
+| Zoning（文脈ラベル） | `cc-analysis` `task:"zone"` | エージェント |
+| Claim 抽出 | `cc-analysis` `task:"claims"` | エージェント |
+| Argument（CGW） | `cc-analysis` `task:"cgw"` | エージェント |
+| Rhetoric（矛盾判定） | `cc-analysis` `task:"refutes"` | エージェント |
+| Ontology 整合 | `cc-analysis`（BFO 5 種）+ `verifiers.py` のオントロジー規則 | エージェント + 規則 |
+| Relation 検証 | `cc-verification` + `verifiers.py`（3 検証器の合成） | エージェント + コード |
+| Meta（重要度・詳細度） | `community.py` / `detail.py` | **決定的コード** |
+| Gap 検出 | `gaps.py` / `gap_report.py` | **決定的コード** |
+| Projection（描画） | `cc-projection` / `cc-layout` / `excalidraw_file.py` | エージェント + コード |
+
+決定的コードに落とした 3 役割（Meta / Gap / 一部 Projection）は、**同じ入力から
+同じ出力が出ることが要件**の工程。重要度の順位やギャップの有無が run ごとに
+揺れると、KPI も「先週と何が変わったか」も測れなくなる。
+
+現行 6 体の内訳は、`agents_def.py` の 5 体（`cc-extraction` / `cc-analysis` /
+`cc-layout` / `cc-projection` / `cc-verification`。`--setup-agents` で登録）と、
+`portal_agent.py` の `cc-cartographer-portal` 1 体（ポータル単体で完結させる
+別経路。`python -m cc_orchestrator.portal_agent` で登録）。いずれも
+**名前は固定してバージョンを積む**（旧 `/assistants` は使わない）。
 
 ### LLM 呼び出しの上限
 

@@ -36,6 +36,11 @@ LAYERS_VERSION = 1
 # `doc["claims"]` を素で書けるようにするため (形が run ごとに変わらない)
 DOCUMENT_KEYS: tuple[str, ...] = ("zones", "claims", "arguments", "refutes")
 
+# 裁定 V: document_id -> 人が読めるファイル名の対応表。
+# **additive な追加キー**で、DOCUMENT_KEYS には入れない (あちらは「必ず list」の
+# 不変則を持つ配列群。documents は dict なので混ぜると読む側の前提が壊れる)。
+DOCUMENTS_KEY = "documents"
+
 # セッション ID はファイル名の一部になる。`..` や `/` を弾く
 # (cc_web.sessions.SESSION_RE と同じ方針。cc_core は cc_web を import しない)
 SESSION_RE = re.compile(r"^[0-9A-Za-z_\-]{1,64}$")
@@ -82,6 +87,11 @@ def load(session: str, *, graphs_dir: str | Path = GRAPHS_DIR) -> dict[str, Any]
     for key in DOCUMENT_KEYS:                       # 旧世代・部分書き込みの穴を埋める
         if not isinstance(doc.get(key), list):
             doc[key] = []
+    # 裁定 V: 対応表は**あるときだけ**通す。無いセッションに空 dict を生やすと
+    # 「対応表があって解決できなかった」と「そもそも対応表が無い」の区別が
+    # 消える。過去セッションは従来表示のままにしたいので遡及生成はしない。
+    if DOCUMENTS_KEY in doc and not isinstance(doc[DOCUMENTS_KEY], dict):
+        doc.pop(DOCUMENTS_KEY)
     doc.setdefault("version", LAYERS_VERSION)
     doc.setdefault("session", session)
     doc.setdefault("splitter", SPLITTER_VERSION)
@@ -99,6 +109,8 @@ def save(session: str, doc: dict[str, Any], *,
                "splitter": doc.get("splitter", SPLITTER_VERSION)}
     for key in DOCUMENT_KEYS:
         ordered[key] = list(doc.get(key) or [])
+    if isinstance(doc.get(DOCUMENTS_KEY), dict) and doc[DOCUMENTS_KEY]:
+        ordered[DOCUMENTS_KEY] = dict(doc[DOCUMENTS_KEY])   # 裁定 V (空なら書かない)
     ordered["stats"] = dict(doc.get("stats") or {})
     for key, value in doc.items():                  # 将来の追加キーも落とさない
         ordered.setdefault(key, value)
@@ -117,6 +129,100 @@ def new_document(session: str, *, splitter: str = SPLITTER_VERSION) -> dict[str,
         doc[key] = []
     doc["stats"] = {}
     return doc
+
+
+# ------------------------------------------------- 裁定 V: document_id の解決
+
+
+def collect_document_ids(doc: dict[str, Any] | None,
+                         kg: dict[str, Any] | None = None) -> list[str]:
+    """出典として画面に出うる document_id を全部集める (出現順・重複なし)。
+
+    zones / claims / kg の evidence_span の 3 か所。ここが「解決したい id」の
+    母集団で、対応表はこの集合に対してだけ作れば足りる。
+    """
+    seen: dict[str, None] = {}
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text:
+            seen.setdefault(text, None)
+
+    for zone in (doc or {}).get("zones", []) or []:
+        if isinstance(zone, dict):
+            add(zone.get("document_id"))
+    for claim in (doc or {}).get("claims", []) or []:
+        if isinstance(claim, dict):
+            add((claim.get("pub_info") or {}).get("document_id"))
+            for span in (claim.get("provenance") or {}).get("source_span", []) or []:
+                if isinstance(span, dict):
+                    add(span.get("document_id"))
+    for bucket in ("nodes", "edges"):
+        for element in (kg or {}).get(bucket, []) or []:
+            if not isinstance(element, dict):
+                continue
+            for span in element.get("evidence_span") or []:
+                if isinstance(span, dict):
+                    add(span.get("document_id"))
+    return list(seen)
+
+
+def build_documents(document_ids: Iterable[str],
+                    names: Iterable[str]) -> dict[str, str]:
+    """document_id -> ファイル名の対応表を作る (裁定 V)。
+
+    `names` は**取込 (ingest) が実際に見たファイル名**。突合は決定的な 4 規則
+    だけで行い、当たらなかった id は表に入れない:
+
+      1. 完全一致       id がファイル名そのもの (取込資料由来の id はこれ)
+      2. basename 一致  id がパス風のとき末尾を見る ("drive/x/報告.pdf")
+      3. 拡張子なし一致 id がファイル名の stem ("報告" -> "報告.pdf")
+      4. 部分一致       ファイル名が id に埋まっている。**候補が 1 件のときだけ**
+
+    Work IQ の不透明な M365 ID (実測では "409" のような値) はどの規則にも
+    当たらないので表に載らない。**推測で埋めない**のが肝で、出典を間違った
+    資料に結びつけるのは生の id を出すより悪い (研究判断の根拠になるため)。
+    当たらなかった id は従来どおり生のまま表示される。
+    """
+    known = [str(n).strip() for n in names or () if str(n or "").strip()]
+    if not known:
+        return {}
+    by_exact = {n: n for n in known}
+    by_lower = {n.lower(): n for n in known}
+    by_stem = {Path(n).stem.lower(): n for n in known}
+
+    table: dict[str, str] = {}
+    for raw in document_ids or ():
+        doc_id = str(raw or "").strip()
+        if not doc_id:
+            continue
+        base = Path(doc_id.replace("\\", "/")).name
+        hit = (by_exact.get(doc_id) or by_lower.get(doc_id.lower())
+               or by_exact.get(base) or by_lower.get(base.lower())
+               or by_stem.get(doc_id.lower()) or by_stem.get(base.lower()))
+        if hit is None:
+            embedded = [n for n in known if len(n) >= 4 and n.lower() in doc_id.lower()]
+            hit = embedded[0] if len(embedded) == 1 else None
+        if hit is not None:
+            table[doc_id] = hit
+    return table
+
+
+def documents_of(doc: dict[str, Any] | None) -> dict[str, str]:
+    """サイドカーから対応表を取り出す (無ければ空 dict)。"""
+    table = (doc or {}).get(DOCUMENTS_KEY)
+    if not isinstance(table, dict):
+        return {}
+    return {str(k): str(v) for k, v in table.items() if k and v}
+
+
+def resolve_document(document_id: Any, documents: dict[str, str] | None) -> str:
+    """表示用のファイル名。対応表に無ければ**元の id をそのまま返す**。
+
+    「過去セッションは対応表が無ければ従来表示」(裁定 V) をこの 1 行で守る。
+    """
+    text = str(document_id or "")
+    return (documents or {}).get(text, text)
 
 
 def session_of_kg_file(kg_file: str | Path | None) -> str | None:

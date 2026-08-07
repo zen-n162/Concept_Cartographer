@@ -1586,6 +1586,16 @@
       "有用率 " + (rate === null || rate === undefined ? "—" : Math.round(rate * 100) + "%")));
     head.appendChild(el("span", "chip-sm grey",
       "確定 " + (usefulness.decided || 0) + " / 候補 " + gaps.length));
+
+    // 「次の一手」レポート (R2c 設計書 §2.1)。資料を横断して調べるので
+    // 押した瞬間には終わらない — 進行中はボタン自身に状態を出す
+    if (gaps.length) {
+      var reportBtn = el("button", "btn-sm", "レポートを作る");
+      reportBtn.type = "button";
+      reportBtn.style.marginLeft = "auto";
+      reportBtn.addEventListener("click", function () { makeGapReport(reportBtn); });
+      head.appendChild(reportBtn);
+    }
     body.appendChild(head);
 
     if (!gaps.length) {
@@ -1593,6 +1603,85 @@
       return;
     }
     gaps.forEach(function (gap) { body.appendChild(gapRow(gap)); });
+  }
+
+  async function makeGapReport(btn) {
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "作成中…";
+    try {
+      var report = await postJSON("/api/sessions/"
+        + encodeURIComponent(state.session) + "/gap-report", {});
+      openModal("ギャップレポート", gapReportBody(report));
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
+  /* レポート本文。finding (決定的) と suggestion (LLM の提案) を
+   * **見た目で区別する** — どちらも同じ書体で並べると、検索して確かめた
+   * 事実と生成された文章の区別がつかなくなる。 */
+  function gapReportBody(report) {
+    var box = el("div", "gap-report");
+    var counts = report.counts || {};
+    var head = el("div", "chip-line");
+    ["structural", "discourse", "causal"].forEach(function (kind) {
+      if (counts[kind]) {
+        head.appendChild(el("span", "chip-sm kind-" + kind,
+          (GAP_KIND_LABEL[kind] || kind) + " " + counts[kind]));
+      }
+    });
+    head.appendChild(el("span", "chip-sm grey",
+      "横断 " + (report.sessions_searched || 0) + " セッション"));
+    head.appendChild(el("span", "chip-sm grey",
+      report.external_used ? "外部照会あり" : "外部照会なし"));
+    head.appendChild(el("span", "chip-sm grey",
+      (report.kb && report.kb.note) || "kb: 未接続"));
+    box.appendChild(head);
+
+    if (!report.suggestions) {
+      box.appendChild(el("p", "gap-note",
+        "LLM の提案はありません (以下はすべて資料検索でわかった事実です)"));
+    }
+
+    (report.items || []).forEach(function (item) {
+      var card = el("div", "gr-item");
+      var top = el("div", "gr-top");
+      top.appendChild(el("span", "chip-sm kind-" + item.gap_type,
+        GAP_KIND_LABEL[item.gap_type] || item.gap_type));
+      top.appendChild(el("span", "gap-src", item.gap_id));
+      card.appendChild(top);
+      if (item.reason) card.appendChild(el("p", "gr-reason", item.reason));
+      card.appendChild(el("p", "gr-finding", item.finding || ""));
+      if (item.suggestion) {
+        var sug = el("p", "gr-suggestion");
+        sug.appendChild(el("span", "gr-tag", "提案"));
+        sug.appendChild(document.createTextNode(" " + item.suggestion));
+        card.appendChild(sug);
+      }
+      (item.sources || []).forEach(function (src) {
+        var where = src.name || src.document_id || "(資料不明)";
+        card.appendChild(el("p", "gap-src", "出典: " + where
+          + (src.label ? " 〈" + src.label + "〉" : "")
+          + " · " + (src.session || "")));
+      });
+      (item.external || []).forEach(function (ext) {
+        card.appendChild(el("p", "gap-src",
+          "外部: [" + (ext.source || "") + "] " + (ext.title || "")));
+      });
+      box.appendChild(card);
+    });
+
+    // ダウンロードはこのアプリの流儀どおりサーバの GET へ張る
+    var dl = el("a", "linkbtn", " JSON をダウンロード");
+    dl.href = "/api/sessions/" + encodeURIComponent(state.session) + "/gap-report";
+    dl.download = "gap_report_" + state.session + ".json";
+    dl.insertBefore(icon("download", "ic-12"), dl.firstChild);
+    box.appendChild(dl);
+    return box;
   }
 
   function gapRow(gap) {

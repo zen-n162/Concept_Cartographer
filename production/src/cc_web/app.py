@@ -27,6 +27,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from cc_core.community import LEVEL_ORDER
 from cc_core.editing import EditConflict, EditError, EditTargetNotFound
 from cc_core.evaluation import EvaluationSession, EvaluationStore
+from cc_core import gap_report as gap_report_mod
 from cc_core.gaps import GapDecisionError
 from cc_core.learning import cue_warnings, load_learned, summarize as summarize_learned
 from cc_core.logging_util import get_logger
@@ -365,6 +366,36 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except GapDecisionError as exc:  # 確定済みの再確定 (上書きしない)
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/sessions/{session}/gap-report")
+    def api_gap_report(session: str) -> dict[str, Any]:
+        """ギャップの「次の一手」を作る (R2c 設計書 §2.1)。
+
+        `run_exclusive` に載せるのは、セッションを横断して KG を読み込むため
+        生成ジョブと同時に走らせたくないから。CPU ではなく**読む対象が動く**
+        のが理由で、生成中の中途半端な plan を材料にすると finding が嘘になる。
+
+        LLM は付いていれば使うが、無くても finding だけで成立する
+        (受け入れ基準 3)。既定では外部ネットワークへは一切出ない (裁定 R)。
+        """
+        _session_or_404(session)
+        return app.state.jobs.run_exclusive(sessions_mod.build_gap_report, session)
+
+    @app.get("/api/sessions/{session}/gap-report")
+    def api_gap_report_file(session: str) -> FileResponse:
+        """保存済みレポートの JSON をそのまま返す (画面のダウンロード用)。
+
+        POST の戻り値と同じ中身。ダウンロードはこのアプリの流儀どおり
+        `<a download>` + GET で行うので、その受け口がいる。
+        """
+        _session_or_404(session)
+        path = Path(gap_report_mod.EXPORT_DIR) / f"gap_report_{session}.json"
+        if not path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="ギャップレポートがまだありません。先に作成してください")
+        return FileResponse(path, media_type="application/json",
+                            filename=path.name)
 
     # -------------------------------------------------- 編集 (§8.1)
     @app.get("/api/sessions/{session}/edits")
