@@ -75,7 +75,8 @@ button:disabled { cursor:default; }
   font-size:12.5px;
   overflow-y:auto;
 }
-.logo { display:flex; align-items:center; justify-content:center; gap:14px; margin:2px 2px 18px; }
+.logo { display:flex; align-items:center; justify-content:center; gap:14px;
+        margin:2px 2px 18px; padding-right:18px; /* 中央より 9px 左へ (光学バランス) */ }
 .logo-mark {
   /* 透過 PNG のブランドマーク (コンパス+概念グラフ)。サイドバーの
      明るい地にそのまま載せる — 箱で囲うとコンパスの尖りが窮屈になる。
