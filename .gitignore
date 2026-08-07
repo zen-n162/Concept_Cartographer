@@ -73,3 +73,5 @@ production/graphs/
 PRODUCTION_PLAN.md
 run.txt
 .claude/
+production/docs/r2b-design.md
+production/docs/r2c-design.md
