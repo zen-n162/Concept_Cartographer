@@ -232,10 +232,10 @@
     <div class="hdr-card acct-card">
       <div class="avatar green" id="acct-initials">··</div>
       <div class="min0">
-        <p class="hdr-title as-text">
+        <button class="hdr-title" id="btn-account" type="button" aria-haspopup="true">
           <span id="acct-name">読み込み中…</span>
           <svg class="ic ic-12"><use href="#i-chevron-down"/></svg>
-        </p>
+        </button>
         <p class="hdr-sub" id="acct-domain"></p>
         <p class="hdr-signed" id="acct-signed">
           <svg class="ic ic-12"><use href="#i-circle-check"/></svg> Microsoft 365 でサインイン中
@@ -300,6 +300,9 @@
   <button type="button" class="dd-item" disabled title="計画 R3">チームモード (準備中)</button>
   <button type="button" class="dd-item" disabled title="計画 R3">機構横断モード (準備中)</button>
 </div>
+
+<!-- アカウントのメニュー。中身はサインイン状態で変わるので app.js が組み立てる -->
+<div class="dropdown" id="acct-menu" hidden></div>
 
 <div class="overlay" id="overlay" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">

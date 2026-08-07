@@ -219,6 +219,218 @@
     $("#acct-signed").hidden = !me.signed_in;
   }
 
+  async function refreshAccount() {
+    try {
+      renderAccount(await api("/api/me"));
+    } catch (err) {
+      toast("アカウント状態を読み込めませんでした: " + err.message);
+    }
+  }
+
+  // ------------------------------------------------- アカウントのメニュー
+  function hideAccountMenu() { $("#acct-menu").hidden = true; }
+
+  /* 裁定 AG (正直な表示): サインアウトが「この Mac の az CLI 全体」に効くこと
+   * — つまり CLI での地図生成にも影響すること — を文言から隠さない。 */
+  function buildAccountMenu() {
+    var menu = $("#acct-menu");
+    clear(menu);
+    var signedIn = !!(state.me && state.me.signed_in);
+
+    if (signedIn) {
+      var out = el("button", "dd-item dd-stack");
+      out.type = "button";
+      out.appendChild(el("span", null, "サインアウト"));
+      out.appendChild(el("span", "dd-note",
+        "この Mac の az CLI 全体からサインアウトします"));
+      out.addEventListener("click", function () { hideAccountMenu(); signOut(); });
+      menu.appendChild(out);
+
+      var reload = el("button", "dd-item", "状態を再読込");
+      reload.type = "button";
+      reload.addEventListener("click", function () {
+        hideAccountMenu();
+        refreshAccount();
+      });
+      menu.appendChild(reload);
+    } else {
+      var login = el("button", "dd-item", "Microsoft 365 にサインイン");
+      login.type = "button";
+      login.addEventListener("click", function () {
+        hideAccountMenu();
+        startSignIn();
+      });
+      menu.appendChild(login);
+    }
+    return menu;
+  }
+
+  function showAccountMenu(anchor) {
+    var menu = buildAccountMenu();
+    var rect = anchor.getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.top = (rect.bottom + 8) + "px";
+    // ヘッダー右端のカードなので、はみ出さないよう右に寄せて置き直す
+    var width = menu.getBoundingClientRect().width;
+    var left = Math.min(rect.left, window.innerWidth - width - 12);
+    menu.style.left = Math.max(12, left) + "px";
+  }
+
+  // ------------------------------------------------------------ サインアウト
+  async function signOut() {
+    try {
+      var res = await postJSON("/api/auth/logout");
+      renderAccount(res.me);
+      if (res.ok) {
+        toast("サインアウトしました (az CLI 全体)");
+      } else {
+        toast("サインアウトできませんでした: " + (res.message || ""));
+      }
+    } catch (err) {
+      toast("サインアウトできませんでした: " + err.message);
+    }
+  }
+
+  // ------------------------------------------------- サインイン (デバイスコード)
+  var authTimer = null;
+  var authView = null;   // モーダル内の差し替え先 (閉じても状態は死なない)
+
+  function stopAuthPoll() {
+    if (authTimer) { clearInterval(authTimer); authTimer = null; }
+  }
+
+  function buildSignInBody() {
+    var box = el("div", "auth-box");
+
+    var code = el("div", "auth-code", "········");
+    box.appendChild(code);
+
+    var row = el("div", "auth-actions");
+    var copy = el("button", "btn-sm", "コードをコピー");
+    copy.type = "button";
+    copy.disabled = true;
+    copy.addEventListener("click", async function () {
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+        toast("コードをコピーしました");
+      } catch (e) {
+        toast("コピーできませんでした。画面のコードを手で入力してください");
+      }
+    });
+    row.appendChild(copy);
+
+    var open = document.createElement("a");
+    open.className = "btn-sm";
+    open.target = "_blank";
+    open.rel = "noopener";
+    open.href = "https://microsoft.com/devicelogin";
+    open.textContent = "microsoft.com/devicelogin を開く";
+    row.appendChild(open);
+    box.appendChild(row);
+
+    var hint = el("p", "auth-hint");
+    hint.appendChild(icon("loader-2", "ic-14 spin"));
+    hint.appendChild(el("span", null, "ブラウザでコードを入力してください…"));
+    box.appendChild(hint);
+
+    box.appendChild(el("p", "gap-src",
+      "サインインすると、この Mac の az CLI のセッションとして保存されます "
+      + "(Web と CLI で共通)。"));
+
+    var msg = el("p", "auth-msg");
+    msg.hidden = true;
+    box.appendChild(msg);
+
+    var cancel = el("button", "btn-sm danger", "中止");
+    cancel.type = "button";
+    cancel.addEventListener("click", async function () {
+      stopAuthPoll();
+      closeModal();
+      try { await postJSON("/api/auth/cancel"); } catch (e) { /* 既に終了 */ }
+      toast("サインインを中止しました");
+    });
+    box.appendChild(cancel);
+
+    authView = { code: code, copy: copy, open: open, hint: hint,
+                 msg: msg, cancel: cancel };
+    return box;
+  }
+
+  function applyAuthStatus(status) {
+    if (!authView) return;
+    if (status.url) authView.open.href = status.url;
+    if (status.code) {
+      authView.code.textContent = status.code;
+      authView.copy.disabled = false;
+    }
+    if (status.status === "authenticating") {
+      authView.hint.lastChild.textContent = "サインインを確認しています…";
+    }
+  }
+
+  function showAuthFailure(message) {
+    if (!authView) { toast(message); return; }
+    authView.hint.hidden = true;
+    authView.msg.textContent = message;
+    authView.msg.hidden = false;
+    authView.copy.disabled = true;
+    authView.cancel.textContent = "閉じる";
+  }
+
+  /* 2 秒ごとに GET /api/auth/login。モーダルを閉じても回し続ける — 手元に
+   * コードを控えて閉じた人の手続きを、こちらの都合で無かったことにしない。 */
+  function pollAuth() {
+    stopAuthPoll();
+    authTimer = setInterval(async function () {
+      var status;
+      try {
+        status = await api("/api/auth/login");
+      } catch (err) {
+        stopAuthPoll();
+        showAuthFailure("状態を確認できませんでした: " + err.message);
+        return;
+      }
+      applyAuthStatus(status);
+      if (status.status === "done") {
+        stopAuthPoll();
+        closeModal();
+        authView = null;
+        await refreshAccount();
+        toast("サインインしました");
+      } else if (status.status === "error") {
+        stopAuthPoll();
+        showAuthFailure(status.message || "サインインできませんでした");
+      } else if (status.status === "idle") {
+        stopAuthPoll();   // 別の経路で中止された
+      }
+    }, 2000);
+  }
+
+  async function startSignIn() {
+    stopAuthPoll();
+    authView = null;
+    var status;
+    try {
+      status = await postJSON("/api/auth/login");
+    } catch (err) {
+      // 409 = 既に実行中 (裁定 AH)。今の状態に合流させる
+      if (err.status === 409) {
+        try { status = await api("/api/auth/login"); }
+        catch (e) { toast(err.message); return; }
+      } else {
+        toast("サインインを開始できませんでした: " + err.message);
+        return;
+      }
+    }
+    openModal("Microsoft 365 にサインイン", buildSignInBody());
+    applyAuthStatus(status);
+    if (status.status === "error") {
+      showAuthFailure(status.message || "サインインを開始できませんでした");
+      return;
+    }
+    pollAuth();
+  }
+
   function updateSeg() {
     var buttons = document.querySelectorAll(".seg-btn");
     for (var i = 0; i < buttons.length; i++) {
@@ -2245,6 +2457,7 @@
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape") {
         closeModal(); hidePopover(); hideModeMenu(); hideInfoPopover();
+        hideAccountMenu();
         if (state.pickFrom) { clearPick(); renderResult($("#result-card")); }
       }
     });
@@ -2311,7 +2524,16 @@
       menu.style.left = rect.left + "px";
       menu.style.top = (rect.bottom + 8) + "px";
     });
+    // アカウントのドロップダウン (サインイン/アウト)
+    $("#btn-account").addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (!$("#acct-menu").hidden) { hideAccountMenu(); return; }
+      showAccountMenu(event.currentTarget);
+    });
+
     document.addEventListener("click", function (event) {
+      if (!$("#acct-menu").hidden && !event.target.closest("#acct-menu")
+        && !event.target.closest("#btn-account")) hideAccountMenu();
       if (!$("#mode-menu").hidden && !event.target.closest("#mode-menu")
         && !event.target.closest("#btn-mode")) hideModeMenu();
       if (!$("#popover").hidden && !event.target.closest("#popover")

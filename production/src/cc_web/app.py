@@ -203,6 +203,36 @@ def create_app() -> FastAPI:
     def api_templates() -> dict[str, Any]:
         return {"templates": TEMPLATES}
 
+    # -------------------------------------------------- サインイン (web-auth)
+    # 認証の実体は az CLI のセッション (裁定 AF)。ここは起動と可視化だけ。
+    @app.post("/api/auth/login", status_code=202)
+    def api_auth_login() -> dict[str, Any]:
+        """デバイスコードフローを開始する。実行中なら 409 (裁定 AH)。
+
+        az が無い / 起動できない場合も **500 にはしない** — status=error と
+        案内文を 202 で返し、UI 側でそのまま出す。サインインできないことは
+        このアプリの異常ではなく、伝えるべき事実だから。
+        """
+        try:
+            return account.start_device_login()
+        except account.LoginInProgress as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/auth/login")
+    def api_auth_login_status() -> dict[str, Any]:
+        return account.login_status()
+
+    @app.post("/api/auth/cancel")
+    def api_auth_cancel() -> dict[str, Any]:
+        return account.cancel_login()
+
+    @app.post("/api/auth/logout")
+    def api_auth_logout() -> dict[str, Any]:
+        """az logout。新しい /api/me を同じ応答に載せる (画面を即差し替える)。"""
+        result = account.logout()
+        return {"ok": result["ok"], "message": result.get("message"),
+                "me": account.me(force=True)}
+
     # -------------------------------------------------- ファイル (inbox)
     @app.get("/api/files")
     def api_files() -> dict[str, Any]:

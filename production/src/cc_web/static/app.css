@@ -400,6 +400,10 @@ button:disabled { cursor:default; }
 .dd-item:hover:not(:disabled) { background:var(--indigo-50); }
 .dd-item:disabled { color:var(--placeholder); }
 .dd-check { margin-left:auto; color:var(--indigo-500); }
+/* 裁定 AG: サインアウトの影響範囲を 2 行目に添える (省略しない) */
+.dd-item.dd-stack { flex-direction:column; align-items:flex-start; gap:2px; }
+.dd-note { font-size:10.5px; color:var(--faint); line-height:1.45; }
+#acct-menu { min-width:264px; }
 
 .overlay {
   position:fixed; inset:0; z-index:70; background:rgba(28,25,58,.28);
@@ -423,6 +427,25 @@ button:disabled { cursor:default; }
 .field select { border:var(--hairline); border-radius:8px; padding:4px 8px;
                 background:#fff; }
 .member-list { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px; }
+
+/* ---------------------------------------- サインイン (デバイスコード) */
+/* コードは離れた画面 (スマホ等) から読んで打ち込むことがあるので、
+   モーダル内で最大の要素にする。等幅・字間広めで 0/O と 1/l を見分ける。 */
+.auth-code {
+  font-family:"SF Mono",Menlo,Consolas,monospace;
+  font-size:30px; font-weight:600; letter-spacing:.18em;
+  text-align:center; color:var(--indigo-700);
+  background:var(--indigo-50); border-radius:12px; padding:16px 12px;
+  margin:2px 0 12px; user-select:all; word-break:break-all;
+}
+.auth-actions { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.auth-actions .btn-sm { text-decoration:none; display:inline-flex;
+                        align-items:center; }
+.auth-hint { display:flex; align-items:center; gap:7px;
+             font-size:12px; color:var(--muted); margin-bottom:8px; }
+.auth-msg { font-size:12px; color:var(--pink-700); background:var(--pink-50);
+            border-radius:8px; padding:8px 10px; margin:8px 0; }
+.auth-box .btn-sm.danger { margin-top:10px; }
 
 .popover {
   position:fixed; z-index:65; background:#fff; border:var(--hairline);
