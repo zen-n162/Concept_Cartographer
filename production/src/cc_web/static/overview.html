@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept Cartographer とは — 説明ページ</title>
+<link rel="icon" type="image/png" href="logo.png">
+<style>
+  /* Web アプリ (app.css) と同じデザイントークン */
+  :root {
+    --ink:#2C2C2A; --bg:#FDFDFC; --panel:#FAFAF8; --border:#E8E6E0;
+    --muted:#5F5E5A; --faint:#888780; --label:#444441;
+    --indigo-900:#26215C; --indigo-700:#3C3489; --indigo-500:#534AB7;
+    --indigo-300:#AFA9EC; --indigo-50:#EEEDFE;
+    --pink-500:#D4537E; --green-700:#0F6E56; --green-50:#E1F5EE;
+    --orange-700:#993C1D; --orange-50:#FAECE7;
+    --grad:linear-gradient(90deg,#534AB7,#D4537E);
+    --hairline:0.5px solid var(--border);
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;
+    font-size:14.5px; line-height:1.8;
+  }
+  .topbar { background:var(--indigo-900); height:6px; }
+  .wrap { max-width:880px; margin:0 auto; padding:36px 24px 64px; }
+  header.hero { display:flex; align-items:center; gap:18px; margin-bottom:8px; }
+  header.hero img { width:72px; height:72px; object-fit:contain; }
+  h1 {
+    margin:0; font-size:34px; font-weight:500; line-height:1.25;
+    background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .tagline { color:var(--muted); margin:2px 0 0; }
+  nav.toc { display:flex; flex-wrap:wrap; gap:8px; margin:22px 0 8px; }
+  nav.toc a {
+    font-size:12.5px; color:var(--indigo-700); text-decoration:none;
+    border:var(--hairline); border-radius:999px; padding:4px 12px; background:#fff;
+  }
+  nav.toc a:hover { background:var(--indigo-50); }
+  h2 {
+    font-size:21px; font-weight:500; color:var(--indigo-900);
+    margin:44px 0 10px; padding-top:10px; border-top:var(--hairline);
+    text-wrap:balance;
+  }
+  h3 { font-size:15.5px; font-weight:600; color:var(--label); margin:22px 0 6px; }
+  p { margin:8px 0; }
+  .lede { font-size:16px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; margin:14px 0; }
+  .card { border:var(--hairline); border-radius:12px; background:#fff; padding:14px 16px; }
+  .card b { display:block; color:var(--indigo-900); margin-bottom:4px; font-weight:600; }
+  .card p { margin:0; font-size:13px; color:var(--muted); }
+  .scroll { overflow-x:auto; border:var(--hairline); border-radius:12px; background:#fff; padding:14px; }
+  table { border-collapse:collapse; width:100%; font-size:13.5px; }
+  th, td { text-align:left; padding:7px 12px; border-bottom:var(--hairline); vertical-align:top; }
+  th { color:var(--label); font-weight:600; white-space:nowrap; }
+  td.sym { font-size:17px; white-space:nowrap; font-weight:600; }
+  .note {
+    border-left:3px solid var(--indigo-300); background:var(--indigo-50);
+    border-radius:0 10px 10px 0; padding:10px 14px; margin:12px 0; font-size:13.5px;
+  }
+  .honest { border-left-color:#2f9e44; background:var(--green-50); }
+  code, pre {
+    font-family:"SF Mono",Menlo,Consolas,monospace; font-size:12.5px;
+    background:var(--panel); border:var(--hairline); border-radius:6px;
+  }
+  code { padding:1px 6px; }
+  pre { padding:12px 14px; overflow-x:auto; line-height:1.6; }
+  pre code { background:none; border:none; padding:0; }
+  figure { margin:16px 0; }
+  figcaption { font-size:12.5px; color:var(--faint); margin-top:6px; }
+  ol.steps { padding-left:22px; } ol.steps li { margin:6px 0; }
+  ul.plain { padding-left:20px; } ul.plain li { margin:5px 0; }
+  .timeline { border-left:2px solid var(--indigo-300); margin:14px 0 14px 6px; padding-left:18px; }
+  .timeline div { margin:10px 0; }
+  .timeline b { color:var(--indigo-900); }
+  footer {
+    margin-top:52px; padding-top:14px; border-top:var(--hairline);
+    font-size:12.5px; color:var(--faint);
+  }
+  .backlink { color:var(--indigo-500); text-decoration:none; }
+  .backlink:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="topbar"></div>
+<div class="wrap">
+
+<header class="hero">
+  <img src="logo.png" alt="Concept Cartographer のロゴ">
+  <div>
+    <h1>Concept Cartographer</h1>
+    <p class="tagline">研究の断片をつなぎ、意味ある全体像へ — 説明ページ</p>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#what">これは何?</a>
+  <a href="#features">できること</a>
+  <a href="#how">しくみ</a>
+  <a href="#symbols">記号の読み方</a>
+  <a href="#trust">信頼の仕組み</a>
+  <a href="#usage">使い方</a>
+  <a href="#history">開発の歩み</a>
+  <a href="#data">データの扱い</a>
+</nav>
+
+<h2 id="what">これは何?</h2>
+<p class="lede">Concept Cartographer は、<b>散らばった研究資料から「概念地図」を自動で描く</b> QST 社内の AI エージェントです。OneDrive・SharePoint・Teams・手元の PDF から資料を読み取り、そこに登場する概念と概念のつながり (因果・相関・分類など) を抽出して、Novak 流の手描き風マップとして 1 枚にまとめます。</p>
+<p>チャットに「<b>今週の研究を概念地図として整理して</b>」と一言入れるだけで、資料収集から描画・検証までが自動で走ります。地図はただの絵ではなく、<b>すべての線に「元の資料のどの文に基づくか」という根拠</b>が付いています。線をクリックすれば逐語引用が読めます。</p>
+<p>もうひとつの主役は「<b>ギャップ (空白の島)</b>」です。資料の中でまだ繋がっていない場所・機序が説明されていない場所を候補として描き、研究の「次の一手」を考える材料にします。</p>
+
+<h2 id="features">できること</h2>
+<div class="cards">
+  <div class="card"><b>🗺 概念地図の生成</b><p>チャット 1 行で資料収集 → 抽出 → 描画 → 独立検証まで。Excalidraw の手描き風マップ + SVG 出力。</p></div>
+  <div class="card"><b>🔍 3 段階の詳細度</b><p>Overview (10-20) / Standard (20-50) / Detailed (50-100 要素)。切替は再生成なし・待ち時間ほぼゼロ。</p></div>
+  <div class="card"><b>✏️ 地図の編集</b><p>概念の改名・追加・削除、関係の種類変更など 8 操作。元データは書き換えず、いつでも取り消せます。</p></div>
+  <div class="card"><b>🎓 修正からの学習</b><p>あなたの直しを用語辞書・除外リスト・因果の上書きとして記憶し、次回の生成に反映。適用内容は必ず表示。</p></div>
+  <div class="card"><b>💬 資料への質問</b><p>「X と Y の関係は?」「全体像をまとめて」に、過去のセッションを横断して出典つきで回答。</p></div>
+  <div class="card"><b>❓ ギャップ検出</b><p>構造・言説・因果の 3 型で「まだ分かっていない場所」を候補提示。型別レポートで次の一手も提案。</p></div>
+  <div class="card"><b>📊 評価と KPI</b><p>地図上のクリック評価が正解データになり、関係の正答率・因果の精度を目標値と突き合わせ。</p></div>
+  <div class="card"><b>💰 コスト制御</b><p>テストモードで同じ依頼の再実行は LLM 呼び出しゼロ。毎回のトークン使用量も表示。</p></div>
+</div>
+
+<h2 id="how">しくみ — 9 段のパイプライン</h2>
+<p>設計の合言葉は「<b>LLM は判断が要るところだけ</b>」。資料を読む・概念を抜く・検証するといった判断は LLM が担い、レイアウト・詳細度の計算・記号への変換は<b>決定的なコード</b> (同じ入力なら必ず同じ結果) が担います。</p>
+
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 940 240" role="img" aria-label="9 段のパイプライン: 経路判定から描画・独立検証までの流れと、LLM が担う段と決定的コードが担う段の区別" style="min-width:880px; display:block;">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5F5E5A"/>
+    </marker>
+  </defs>
+  <!-- 上段: ①-④ -->
+  <g font-size="12" text-anchor="middle">
+    <rect x="10"  y="30" width="100" height="46" rx="9" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="60" y="49" fill="#26215C">⓪ 経路判定</text><text x="60" y="65" fill="#888780" font-size="10">質問なら QA へ</text>
+    <rect x="130" y="30" width="100" height="46" rx="9" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="180" y="49" fill="#26215C">① 資料収集</text><text x="180" y="65" fill="#888780" font-size="10">Work IQ / PDF</text>
+    <rect x="250" y="30" width="100" height="46" rx="9" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="300" y="49" fill="#26215C">②③ 文脈と主張</text><text x="300" y="65" fill="#888780" font-size="10">文ラベル→主張抽出</text>
+    <rect x="370" y="30" width="100" height="46" rx="9" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="420" y="49" fill="#26215C">④ 関係検証</text><text x="420" y="65" fill="#888780" font-size="10">因果 3 点セット</text>
+    <rect x="490" y="30" width="100" height="46" rx="9" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="540" y="49" fill="#26215C">⑤ 主張の検証</text><text x="540" y="65" fill="#888780" font-size="10">3 検証器の合成</text>
+    <rect x="610" y="30" width="100" height="46" rx="9" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="660" y="49" fill="#26215C">⑥ 論証と矛盾</text><text x="660" y="65" fill="#888780" font-size="10">⚡ はここで確定</text>
+    <rect x="730" y="30" width="95" height="46" rx="9" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="777" y="49" fill="#26215C">⑦ 記号へ投影</text><text x="777" y="65" fill="#888780" font-size="10">30 種→8 記号</text>
+    <rect x="845" y="30" width="85" height="46" rx="9" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="887" y="49" fill="#26215C">⑧ 描画</text><text x="887" y="65" fill="#888780" font-size="10">+ 独立検証</text>
+  </g>
+  <g stroke="#5F5E5A" stroke-width="1.3">
+    <line x1="110" y1="53" x2="126" y2="53" marker-end="url(#ah)"/>
+    <line x1="230" y1="53" x2="246" y2="53" marker-end="url(#ah)"/>
+    <line x1="350" y1="53" x2="366" y2="53" marker-end="url(#ah)"/>
+    <line x1="470" y1="53" x2="486" y2="53" marker-end="url(#ah)"/>
+    <line x1="590" y1="53" x2="606" y2="53" marker-end="url(#ah)"/>
+    <line x1="710" y1="53" x2="726" y2="53" marker-end="url(#ah)"/>
+    <line x1="825" y1="53" x2="841" y2="53" marker-end="url(#ah)"/>
+  </g>
+  <!-- 中間契約の帯 -->
+  <rect x="130" y="110" width="695" height="40" rx="9" fill="#fff" stroke="#534AB7" stroke-dasharray="5 4"/>
+  <text x="477" y="130" text-anchor="middle" font-size="12" fill="#3C3489">中間契約 layout_plan.json — LLM の出力は直接描かず、スキーマ + 意味検証を通った計画だけを描画する</text>
+  <text x="477" y="144" text-anchor="middle" font-size="10.5" fill="#888780">3 段階の詳細度を同梱 / 編集・再構成・詳細度切替はすべてこの層で完結 (LLM ゼロ)</text>
+  <line x1="477" y1="80" x2="477" y2="106" stroke="#534AB7" stroke-width="1.3" marker-end="url(#ah)"/>
+  <!-- 凡例 -->
+  <g font-size="11.5">
+    <rect x="130" y="185" width="16" height="16" rx="4" fill="#EEEDFE" stroke="#AFA9EC"/>
+    <text x="154" y="198" fill="#5F5E5A">LLM が判断する段 (資料読取・抽出・検証)</text>
+    <rect x="430" y="185" width="16" height="16" rx="4" fill="#FAFAF8" stroke="#E8E6E0"/>
+    <text x="454" y="198" fill="#5F5E5A">決定的コードの段 (同じ入力 → 必ず同じ結果)</text>
+  </g>
+</svg>
+</div>
+<figcaption>紫の段だけが LLM を使う。レイアウト・詳細度・記号変換は決定的で、生成後の操作 (切替・編集・再描画) に LLM は不要。</figcaption>
+</figure>
+
+<h3>可変詳細度のからくり</h3>
+<p>地図はいちばん細かい粒度で 1 回だけ生成し、<b>3 段階ぶんの表示計画を 1 つのファイルに同梱</b>します。コミュニティ検出 (Leiden 法) で概念を「島」にまとめ、重要度 (媒介中心性 + 出現頻度 + 新規性) の高い概念から表示枠に入れ、入り切らない概念は「集約ノード」に畳みます。だから Overview ⇄ Detailed の切替は取り出すだけ — 再計算も LLM もありません。</p>
+
+<h2 id="symbols">記号の読み方 — 画面は 8 種、内部は 30 種</h2>
+<p>関係の線は 8 種類の記号で描かれます。内部では 4 層 30 種のタグで意味を保持しており、<b>線をクリックすると根拠の引用・内部タグ・検証スコアが全部見えます</b> (「シンプルに見せるが情報は失わない」原則)。</p>
+<div class="scroll">
+<table>
+  <tr><th>記号</th><th>意味</th><th>表示される条件</th></tr>
+  <tr><td class="sym" style="color:#c92a2a">→</td><td>因果</td><td><b>証明つきのときだけ。</b>機序・介入・反事実の語彙証拠があり、かつ検証器の合成スコアが 0.75 以上の場合のみ矢印になります。それ以外は 〜 に降格</td></tr>
+  <tr><td class="sym" style="color:#1971c2">〜</td><td>相関</td><td>統計的な関連。因果を含意しません (裏付け不足の因果候補もここへ)</td></tr>
+  <tr><td class="sym" style="color:#e8590c">⚡</td><td>矛盾</td><td><b>主張どうしの反駁 (refutes) が別モデルで確定したときだけ。</b>それ以外の対立は灰色破線の「対立候補」として非断定表示</td></tr>
+  <tr><td class="sym" style="color:#2f9e44">⇒</td><td>補強</td><td>複数の独立した証拠が同じ主張を支持</td></tr>
+  <tr><td class="sym" style="color:#1971c2">◇</td><td>分類 (is-a)</td><td>「A は B の一種」というオントロジー関係</td></tr>
+  <tr><td class="sym" style="color:#6741d9">◧</td><td>構成 (part-of)</td><td>「A は B の一部」という部分-全体関係</td></tr>
+  <tr><td class="sym" style="color:#495057">▷</td><td>時系列</td><td>時間的な先行 (因果は別途 → で明示)</td></tr>
+  <tr><td class="sym" style="color:#e8590c">?</td><td>疑問</td><td>主張への問いかけ (questions)</td></tr>
+  <tr><td class="sym" style="color:#868e96">✦ 破線</td><td>ギャップ候補</td><td>「まだ繋がっていない場所」。破線 + 半透明の非断定表示で、あなたが 有用 / 却下 を確定します</td></tr>
+</table>
+</div>
+
+<h2 id="trust">信頼の仕組み — なぜこの地図を信じられるのか</h2>
+<ul class="plain">
+  <li><b>全ての線に根拠</b> — 関係には元資料の逐語引用 (evidence) が必ず付き、クリックで読めます。根拠を辿れない関係は無効。</li>
+  <li><b>LLM の言い分をそのまま描かない</b> — 因果は 3 点セット (候補 → 語彙証拠 → 別モデルの独立検証) を通ったものだけ。検証に落ちた主張は却下ログに記録され、地図から外れた理由ごと「因果ギャップ」の材料になります。</li>
+  <li><b>描いた結果も別モデルが検証</b> — 描画後にキャンバスの実物と計画を突合し、欠落・ラベル不一致を検査します。</li>
+  <li><b>人間が最終権威</b> — あなたの編集は機械判定より常に優先され、上書きされません。ギャップの確定も人間だけが行います。</li>
+  <li><b>黙って直さない</b> — 形式修復・学習の自動適用・降格は、何をしたか必ず実行サマリに表示されます。</li>
+  <li><b>読めない図を黙って出さない</b> — 関係ラベルの位置は、ノード・島の見出し・他のラベルを避けて地図全体で一括に決めます (ノードの座標は動かしません)。それでも逃げ場が無いラベルは、文字を縮めたうえで「重なりが残った」と実行サマリに表示します。</li>
+</ul>
+<div class="note honest">AI が生成した回答は必ずしも正確とは限りません。重要な判断の前には、根拠の引用を開いて元資料をご確認ください — そのための「クリックで逐語引用」です。</div>
+
+<h2 id="usage">使い方</h2>
+<h3>Web アプリ (おすすめ)</h3>
+<pre><code>cd production
+./scripts/start_web.sh     # → http://127.0.0.1:8090</code></pre>
+<ol class="steps">
+  <li>ホームのテンプレートを選ぶか、依頼文を入力して送信</li>
+  <li>進捗カードで 13 ステージの進み具合を確認 (数分)</li>
+  <li>結果カードで地図・ギャップ・評価タブを操作。ヘッダーで詳細度を切替</li>
+  <li>線をクリック → 根拠と内部タグ。編集モードで直す → 次回の生成が賢くなる</li>
+</ol>
+<h3>コマンドライン</h3>
+<pre><code># 地図生成
+./.venv/bin/python -m cc_orchestrator.chat "今週の研究を概念地図として整理して"
+# 質問 (出典つき回答)
+./.venv/bin/python -m cc_orchestrator.chat "SuperPCAとスーパーピクセルの関係は?"
+# ギャップの型別レポート
+./.venv/bin/python -m cc_orchestrator.chat --gap-report &lt;セッションID&gt;</code></pre>
+<h3>テスト・検証時の節約</h3>
+<p>設定の<b>テストモード</b> (CLI は <code>--test-cache</code>) を入れると、同じ依頼 + 同じ設定の再実行は 6 時間以内なら前回結果を再利用します — LLM 呼び出しゼロ・数秒で完了。使用量は毎回表示され、<code>--token-report</code> で日別集計も見られます。</p>
+
+<h2 id="history">開発の歩み</h2>
+<div class="timeline">
+  <div><b>PoC</b> — チャット 1 行 → 資料収集 → 抽出 → Excalidraw 描画 → 独立検証の実証 (4 エージェント構成、実測 2.5〜3.5 分)</div>
+  <div><b>R1 個人モード</b> — 可変詳細度 3 段・因果 3 点セット・ギャップ確定・経路判定・評価収集・ヘッドレス SVG</div>
+  <div><b>R1.5</b> — 地図の編集 8 操作 (原本不変 + 追記ログ) と、修正からの学習。ローカル Web アプリ</div>
+  <div><b>R2a 多層化</b> — 文脈ラベル・簡易 Nanopub 主張・3 検証器・Toulmin 論証・内部矛盾検出・8 記号・ギャップ 3 型</div>
+  <div><b>R2b 検索</b> — セッション横断の索引と QA 3 経路 (出典つき回答・LazyGraphRAG-lite)</div>
+  <div><b>R2c 評価・推薦</b> — 日本語正解セットによるオフライン KPI・型別 Gap Report・閉世界推薦</div>
+  <div><b>可読性 v2</b> — 関係ラベルの重なりを地図全体で一括に解消。キャンバスと SVG が同じ位置に描き、解消できない分は警告として表示</div>
+</div>
+
+<h2 id="data">データの扱い</h2>
+<ul class="plain">
+  <li>資料の読み取りは <b>本人権限</b> (Work IQ 経由)。読めるのはあなたが読めるものだけ</li>
+  <li>生成物 (知識グラフ・地図・編集履歴・評価) はすべて<b>手元の graphs/ と logs/ に保存</b>。既定で外部サービスへの送信はありません (論文推薦の公開 API は明示的に有効化したときのみ・送信内容は全件記録)</li>
+  <li>研究内容 (概念名・逐語引用) を含むファイルは GitHub 公開から機械的に除外</li>
+</ul>
+
+<footer>
+  この説明は <b>R2c + コスト制御 + 可読性 v2 (2026-08-07) 時点</b>の実装に基づきます。機能追加・仕様変更の際にこのページも更新されます。<br>
+  <a class="backlink" href="/">← Web アプリへ戻る</a>
+</footer>
+
+</div>
+</body>
+</html>

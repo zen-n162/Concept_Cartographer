@@ -75,13 +75,15 @@ button:disabled { cursor:default; }
   font-size:12.5px;
   overflow-y:auto;
 }
-.logo { display:flex; align-items:center; gap:12px; margin:0 2px 16px; }
+.logo { display:flex; align-items:center; gap:14px; margin:2px 2px 18px; }
 .logo-mark {
   /* 透過 PNG のブランドマーク (コンパス+概念グラフ)。サイドバーの
-     明るい地にそのまま載せる — 箱で囲うとコンパスの尖りが窮屈になる */
-  width:42px; height:42px; object-fit:contain; flex:0 0 auto;
+     明るい地にそのまま載せる — 箱で囲うとコンパスの尖りが窮屈になる。
+     56px = サイドバー幅 240px に対しマーク+間隔+2行ロゴタイプが
+     きれいに収まる上限 (56+14+約100px)。文字も 14.5px へ釣り合いを取る */
+  width:56px; height:56px; object-fit:contain; flex:0 0 auto;
 }
-.logo-text { font-size:13.5px; font-weight:500; line-height:1.25; color:var(--indigo-900); }
+.logo-text { font-size:14.5px; font-weight:500; line-height:1.3; color:var(--indigo-900); }
 
 .side-item {
   display:flex; align-items:center; gap:8px;
@@ -232,6 +234,8 @@ button:disabled { cursor:default; }
            background:var(--indigo-50); color:var(--indigo-700); }
 .chip-sm.green { background:var(--green-50); color:var(--green-700); }
 .chip-sm.grey { background:#F2F1EC; color:var(--muted); }
+/* ラベルの重なりが解消しきれなかったときの警告 (レイアウト重なり設計書 裁定 AC) */
+.chip-sm.warn { background:var(--orange-50); color:var(--orange-700); }
 /* ギャップの型バッジ (R2a 設計書 §9)。構造=既定の藍、言説=緑、因果=桃 */
 .chip-sm.kind-structural { background:var(--indigo-50); color:var(--indigo-700); }
 .chip-sm.kind-discourse { background:var(--green-50); color:var(--green-700); }

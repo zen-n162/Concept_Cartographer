@@ -706,6 +706,21 @@
     }
     card.appendChild(row);
 
+    // --- ラベルの重なり警告 (レイアウト重なり設計書 裁定 AC) ---
+    // 逃げ場が無くて重ねたときは黙らない。CLI 側 (_summary_body) と同じ情報。
+    var ov = summary.overlaps;
+    if (ov && ov.clean === false) {
+      var un = ov.unresolved_labels || [];
+      var msg = "ラベルの重なりを完全には解消できませんでした";
+      if (un.length) {
+        msg += " — 逃げ場なし " + un.length + " 件 ("
+          + un.slice(0, 5).map(function (u) { return u.edge; }).join(", ") + ")";
+      }
+      var warn = el("div", "chip-line");
+      warn.appendChild(el("span", "chip-sm warn", "⚠️ " + msg));
+      card.appendChild(warn);
+    }
+
     // --- 関係検証チップ (裁定 7 の結果) ---
     // 生成直後は summary.relation_policy を、履歴から開いた時は KPI の
     // causal 集計 (plan から再計算されたもの) を使う。
@@ -2148,6 +2163,14 @@
 
   function openHelp() {
     var box = el("div");
+    var intro = el("p");
+    var link = document.createElement("a");
+    link.href = "/static/overview.html";
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = "📖 Concept Cartographer の詳しい説明ページを開く";
+    intro.appendChild(link);
+    box.appendChild(intro);
     var list = document.createElement("ul");
     [
       "テンプレート: ホームの 4 枚をクリックすると依頼文が入ります。そのまま送信できます。",

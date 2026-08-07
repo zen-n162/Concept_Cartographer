@@ -10,6 +10,8 @@
 - **軽い追加実装 = Claude Sonnet 5**: 設計が固まっている小さめの機能
 - 機能変更は **CLI (`cc_orchestrator.chat`) と Web (`cc_web`) の両方**に反映する。
   ロジックは `cc_core/` に置き、CLI フラグと Web API はどちらも薄いラッパにする
+- **機能追加・仕様変更時は説明ページ `production/src/cc_web/static/overview.html` も更新する**
+  (ユーザー指定・恒久。フッターの「〜時点」表記も更新)。Web の ヘルプ から開ける
 
 ## ドキュメント
 
