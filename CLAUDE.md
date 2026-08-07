@@ -21,7 +21,7 @@
 | `production/docs/edit-feedback-design.md` | 編集とフィードバック学習の詳細設計 |
 | `production/docs/excalidraw-export-design.md` | 「Excalidraw で開く」の設計 |
 | `設計文書/` | 元の設計 PDF と引き継ぎメモ |
-| `poc/` | 凍結保存した PoC (タグ `poc-v1`)。原則触らない |
+| `poc` **ブランチ** | PoC の保存・改良ライン (タグ `poc-v1`)。main には poc/ を置かない。ローカルの poc/ 配下は未追跡の稼働資産のみ (my-mcp-server = canvas/gateway、graphs、.venv — 削除しないこと) |
 
 ## 環境の要点 (実測済みのハマりどころ)
 
