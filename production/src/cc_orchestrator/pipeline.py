@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -34,7 +35,7 @@ from cc_core.learning import (
     note_cues_kept,
 )
 from cc_core.logging_util import get_logger
-from cc_core.mcp_client import extract_json
+from cc_core.mcp_client import extract_json, gateway_healthy
 from cc_core.normalize import extract_max, merge_extraction, normalize_kg
 from cc_core.overlap import check_overlaps
 from cc_core.svg_export import write_svg
@@ -68,6 +69,42 @@ VERIFY_PROMPT = (
     '{"verdict": "PASS"|"FAIL", "missing": <数>, "mismatched": <数>, '
     '"summary": "<50字以内>"} の JSON で返してください。'
 )
+
+# ---- 描画の逃げ道 (描画ハング恒久対処 計画 C/D) ----------------------------
+# ライブキャンバス (target=local) は外部プロセス 2 つ (canvas :3000 / MCP
+# gateway :8000) に依存する。落ちていたり半死だったりしたときに待ち続けず、
+# **ファイル生成へ倒して完走させる**。黙って倒すと「ライブに描いたつもりが
+# 描かれていない」になるので、必ず summary に理由を残して CLI/Web に出す。
+RENDER_DEADLINE_ENV = "CC_RENDER_DEADLINE_S"
+DEFAULT_RENDER_DEADLINE_S = 600.0
+
+GATEWAY_DOWN_NOTE = (
+    "⚠ ライブキャンバスが応答しないため、ファイル生成に切り替えました。"
+    "canvas 起動後に --render で描き直せます。")
+RENDER_DEADLINE_NOTE = (
+    "⚠ ライブキャンバスへの描画が時間内に終わらなかったため、"
+    "ファイル生成に切り替えました。canvas 起動後に --render で描き直せます。")
+
+
+def _render_deadline_s() -> float:
+    """描画段の壁時計上限 (秒)。env CC_RENDER_DEADLINE_S で上書き可。
+
+    実行のたびに読む — import 時に固めると、テストや運用での上書きが効かない。
+    """
+    raw = os.environ.get(RENDER_DEADLINE_ENV)
+    if not raw:
+        return DEFAULT_RENDER_DEADLINE_S
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("%s が数値ではありません (%r); 既定 %.0f 秒を使います",
+                       RENDER_DEADLINE_ENV, raw, DEFAULT_RENDER_DEADLINE_S)
+        return DEFAULT_RENDER_DEADLINE_S
+
+
+class _RenderDeadlineExceeded(RuntimeError):
+    """描画段が壁時計デッドラインを超えた (内部用; 呼び出し元へは出ない)。"""
+
 
 ProgressFn = Callable[[str, str], None]
 """進捗フック: (stage_key, 日本語ラベル)。Web UI の進捗チェックリスト用。"""
@@ -1298,41 +1335,83 @@ def run_pipeline(
     # 要るのは「ツールを呼べ」という指示だけで、何を描くかはツール側が知っている。
     executor.authoritative_plan = view
     verdict: dict[str, Any] = {}
-    if offline:
-        # エージェントを介さず実行系を直接叩く。往復が無いので再試行も不要。
-        render_status = executor("render_layout_plan", {"plan": view})
+
+    def _render_verify_direct(ex: ToolExecutor) -> dict[str, Any]:
+        """エージェントを介さず実行系を直接叩く。往復が無いので再試行も不要。
+
+        offline と、ライブキャンバスからの file フォールバック (計画 C/D) が
+        共有する経路。どちらも「LLM に描かせない」点で同じ。
+        """
+        render_status = ex("render_layout_plan", {"plan": view})
         if not render_status.get("success"):
             raise RuntimeError(f"projection failed: {render_status.get('errors')}")
         summary["projection"] = {
             "status": "RENDER_OK",
             "created": len(render_status.get("created", [])),
-            "mode": render_status.get("mode", target),
+            "mode": render_status.get("mode", ex.target),
         }
         _notify(progress, "verify")
-        report = executor("verify_scene", {})
-        verdict = {
+        report = ex("verify_scene", {})
+        result = {
             "verdict": "PASS" if report.get("passed") else "FAIL",
             "summary": (f"要素 {report.get('canvas_element_count', 0)} / 期待 "
                         f"{report.get('expected_element_count', 0)}"
                         f" (欠落 {len(report.get('missing_elements', []))} / "
                         f"ラベル不一致 {len(report.get('label_mismatches', []))})"),
         }
-        summary["verification"] = verdict
-    else:
-        for attempt in (1, 2):
-            render_status = extract_json(client.run(
-                "cc-projection", RENDER_PROMPT, tool_executor=executor))
-            summary["projection"] = render_status
-            if render_status.get("status") != "RENDER_OK":
-                raise RuntimeError(f"projection failed: {render_status}")
+        summary["verification"] = result
+        return result
 
-            _notify(progress, "verify")
-            verdict = extract_json(client.run(
-                "cc-verification", VERIFY_PROMPT, tool_executor=executor))
-            summary["verification"] = verdict
-            if verdict.get("verdict") == "PASS":
-                break
-            logger.warning("verification FAIL (attempt %d)", attempt)
+    def _fallback_to_file(note: str) -> dict[str, Any]:
+        """ライブキャンバスへ描けないときの逃げ道 (計画 C/D)。
+
+        target=file の ToolExecutor を新たに立て、MCP を一切使わずに描画・検証・
+        書き出しを済ませる。以降の export もこの executor を使うため、ライブ
+        ゲートウェイに触れないまま完走する。
+        """
+        nonlocal executor
+        logger.warning("render fallback to file: %s", note)
+        executor = ToolExecutor(target="file")
+        executor.authoritative_plan = view
+        summary["render_fallback"] = True
+        summary["render_note"] = note
+        _notify(progress, "render")
+        return _render_verify_direct(executor)
+
+    if offline:
+        verdict = _render_verify_direct(executor)
+    elif target == "local" and not gateway_healthy(timeout=3.0):
+        # プリフライト: 描きに行く前に 3 秒でゲートウェイの生死を見る。
+        # 落ちていると分かっているものに向かってエージェントを走らせない。
+        verdict = _fallback_to_file(GATEWAY_DOWN_NOTE)
+    else:
+        deadline = time.monotonic() + _render_deadline_s()
+
+        def _check_deadline() -> None:
+            if time.monotonic() > deadline:
+                raise _RenderDeadlineExceeded()
+
+        try:
+            for attempt in (1, 2):
+                _check_deadline()
+                render_status = extract_json(client.run(
+                    "cc-projection", RENDER_PROMPT, tool_executor=executor))
+                summary["projection"] = render_status
+                if render_status.get("status") != "RENDER_OK":
+                    raise RuntimeError(f"projection failed: {render_status}")
+
+                _notify(progress, "verify")
+                _check_deadline()
+                verdict = extract_json(client.run(
+                    "cc-verification", VERIFY_PROMPT, tool_executor=executor))
+                summary["verification"] = verdict
+                if verdict.get("verdict") == "PASS":
+                    break
+                logger.warning("verification FAIL (attempt %d)", attempt)
+        except _RenderDeadlineExceeded:
+            # 最後の網。プリフライトをすり抜けた半死のゲートウェイでも、
+            # ここで必ず打ち切ってファイル生成へ倒す (数時間固まらせない)。
+            verdict = _fallback_to_file(RENDER_DEADLINE_NOTE)
 
     # ---- 出力 ----
     _notify(progress, "export")

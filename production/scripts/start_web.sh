@@ -30,7 +30,9 @@ fi
 # 古いサーバが残っていると bind に失敗し、**修正したはずのコードが動かない**まま
 # 前のプロセスが応答し続ける【実測 2026-08-07: 3 時間前に起動したサーバが旧仕様で
 # 生成し、修正が効いていないように見えた】。掴んでいるのが自分のアプリなら置き換える。
-STALE_PIDS="$(lsof -ti "tcp:${PORT}" 2>/dev/null || true)"
+# -sTCP:LISTEN が要点 — lsof は接続中のクライアント (ブラウザ) も返すため、
+# リスナーに限定しないと Chrome を「別アプリ」と誤認して起動を拒否する【実測】
+STALE_PIDS="$(lsof -ti "tcp:${PORT}" -sTCP:LISTEN 2>/dev/null || true)"
 if [ -n "$STALE_PIDS" ]; then
   for pid in $STALE_PIDS; do
     if ps -p "$pid" -o command= 2>/dev/null | grep -q "cc_web.app"; then

@@ -370,8 +370,10 @@
     <text x="174" y="606" text-anchor="middle" fill="#26215C">→ ライブ canvas :3000</text>
     <text x="174" y="622" text-anchor="middle" fill="#888780" font-size="9.5">描画後に要素を照合 (独立検証)</text>
     <rect x="330" y="566" width="220" height="66" rx="8" fill="#FAFAF8" stroke="#E8E6E0"/>
-    <text x="440" y="592" text-anchor="middle" fill="#26215C">ファイル直接生成</text>
-    <text x="440" y="610" text-anchor="middle" fill="#888780" font-size="9.5">.excalidraw / ヘッドレス SVG (MCP 不要)</text>
+    <text x="440" y="588" text-anchor="middle" fill="#26215C">ファイル直接生成</text>
+    <text x="440" y="604" text-anchor="middle" fill="#888780" font-size="9.5">.excalidraw / ヘッドレス SVG (MCP 不要)</text>
+    <text x="440" y="622" text-anchor="middle" fill="#C4923C" font-size="9">⚠ gateway 不達・時間切れは自動でこちらへ</text>
+    <line x1="296" y1="599" x2="326" y2="599" stroke="#888780" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#p3)"/>
   </g>
 
   <!-- Microsoft クラウド境界 -->
@@ -475,7 +477,7 @@
   <tr><td>pipeline.py</td><td>⓪〜⑧ の段取りと QA 3 経路。LLM 呼び出しはここが束ねる (上限 knob つき)</td></tr>
   <tr><td>cc_core</td><td>決定的コア: 正規化・記号投影・詳細度・ギャップ・ラベル配置・編集・学習・検証合成・評価</td></tr>
   <tr><td>cc_store</td><td>セッション横断の SQLite 索引 + コーパスグラフ (QA と Gap Report の材料。派生キャッシュ)</td></tr>
-  <tr><td>描画面</td><td>layout_plan.json 中間契約 → Excalidraw MCP gateway :8000 → canvas :3000 / またはファイル直接生成</td></tr>
+  <tr><td>描画面</td><td>layout_plan.json 中間契約 → Excalidraw MCP gateway :8000 → canvas :3000 / またはファイル直接生成。<b>描画前に gateway の /healthz を 3 秒で確認し、不達ならファイル生成へ自動で切り替える</b> (切替は警告として表示)。MCP 接続そのものにも 10 秒の上限があり、半死のゲートウェイで待ち続けない</td></tr>
   <tr><td rowspan="3">クラウド</td><td>Microsoft Foundry</td><td>エージェント 4 体 (抽出 sol / 分析 sol / 検証 terra / 描画指揮 luna)。抽出と検証は別モデル</td></tr>
   <tr><td>Work IQ Remote MCP</td><td>OneDrive / SharePoint / Teams を本人権限で読む (Foundry 側で動作)</td></tr>
   <tr><td>Microsoft 365</td><td>研究資料の置き場所</td></tr>
@@ -485,7 +487,7 @@
 <div class="note">この構成の設計原則 — <b>LLM は判断が要るところだけ</b> (読む・抜く・検証する)。構造化・レイアウト・記号変換・再構成は決定的コードが担い、同じ入力からは必ず同じ地図が出ます。詳しい処理の流れは <a class="backlink" href="overview.html#how">説明ページの「しくみ」</a> へ。</div>
 
 <footer>
-  この構成図は <b>抽出 v2 + レスポンシブ (2026-08-07) 時点</b>の実装に基づきます。機能追加・仕様変更の際にこのページも更新されます。<br>
+  この構成図は <b>抽出 v2 + レスポンシブ + 描画フォールバック (2026-08-08) 時点</b>の実装に基づきます。機能追加・仕様変更の際にこのページも更新されます。<br>
   <a class="backlink" href="overview.html">← 説明ページ</a> ・ <a class="backlink" href="/">Web アプリへ</a>
 </footer>
 

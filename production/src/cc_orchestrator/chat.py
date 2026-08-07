@@ -258,6 +258,10 @@ def _summary_body(s: dict) -> None:
             kinds = gp["by_gap_type"]
             print(f"   型: 構造 {kinds.get('structural', 0)} / "
                   f"言説 {kinds.get('discourse', 0)} / 因果 {kinds.get('causal', 0)}")
+    if s.get("render_fallback"):
+        # ライブキャンバスへ描けずファイル生成へ倒した回は黙らない
+        # (Work IQ フォールバックと同じ意匠)。
+        print(f"🖼  描画: ファイル生成へ切替\n   {s.get('render_note', '')}")
     ver = s.get("verification", {})
     mark = "✅" if s.get("status") == "success" else "❌"
     print(f"{mark} 検証: {ver.get('verdict')}  {ver.get('summary', '')}")

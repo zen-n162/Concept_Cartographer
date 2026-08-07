@@ -86,6 +86,53 @@ class JobManager:
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cc-job")
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._mark_interrupted()
+
+    # ------------------------------------------------------ 起動時の後始末
+    def _mark_interrupted(self) -> None:
+        """履歴に running/queued のまま残った行を "interrupted" へ直す。
+
+        ジョブの進行中にサーバが落ちる (または固まったまま置き換えられる) と、
+        その行は永久に running のままになる。プロセスが変わった以上そのジョブは
+        もう動いていないので、起動時に 1 回だけ正直な状態へ書き換える
+        【実測 2026-08-07: 描画ハングで 23:20 のジョブが running のまま残った】。
+        """
+        path = self.history_path
+        try:
+            if not path.exists():
+                return
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            logger.warning("history read failed: %s", type(exc).__name__)
+            return
+
+        fixed = 0
+        out: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                entry = json.loads(stripped)
+            except json.JSONDecodeError:
+                out.append(stripped)          # 壊れた行はそのまま残す
+                continue
+            if isinstance(entry, dict) and entry.get("status") in ("running", "queued"):
+                entry["status"] = "interrupted"
+                entry["note"] = "サーバ再起動により中断"
+                fixed += 1
+                out.append(json.dumps(entry, ensure_ascii=False))
+            else:
+                out.append(stripped)
+        if not fixed:
+            return
+        try:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text("\n".join(out) + "\n", encoding="utf-8")
+            tmp.replace(path)                  # 書き換えは原子的に (履歴を失わない)
+            logger.info("history: marked %d stale job(s) as interrupted", fixed)
+        except OSError as exc:
+            logger.warning("history rewrite failed: %s", type(exc).__name__)
 
     # ------------------------------------------------------------ 投入
     def submit(self, params: dict[str, Any]) -> Job:

@@ -939,6 +939,13 @@
       card.appendChild(iw);
     }
 
+    // --- 描画フォールバック警告 (ライブキャンバスへ描けなかった回) ---
+    if (summary.render_fallback && summary.render_note) {
+      var rw = el("div", "chip-line");
+      rw.appendChild(el("span", "chip-sm warn", summary.render_note));
+      card.appendChild(rw);
+    }
+
     // --- ラベルの重なり警告 (レイアウト重なり設計書 裁定 AC) ---
     // 逃げ場が無くて重ねたときは黙らない。CLI 側 (_summary_body) と同じ情報。
     var ov = summary.overlaps;
