@@ -1274,6 +1274,54 @@
   // 使い回しの単一関数なのでモジュール変数で受け渡す。
   var mapPanSuppressClick = false;
 
+  // 表示中の地図のズーム操作 { wrap, zoomAt }。renderResult のたびに差し替わる。
+  // ホイール/ピンチは wrap 個別ではなく下の document 委譲リスナーで受ける —
+  // 地図カードの余白 (ツールバーやサマリ行) 上のピンチも地図ズームに向け、
+  // ブラウザのページズームに吸われないようにするため。
+  var mapZoomCtl = null;
+
+  // --- ⌘/Ctrl+ホイールでカーソル位置を中心にズーム。素のホイールは
+  //     preventDefault しないのでネイティブのスクロールに任せる。
+  //     Chrome/Edge/Firefox はトラックパッドのピンチも ctrlKey 付きの
+  //     wheel イベントとして届くので、この 1 本で両方に効く。
+  //     (typeof ガードは Node からの状態機械テスト用 — 末尾の bootstrap と同じ) ---
+  if (typeof document !== "undefined") {
+  document.addEventListener("wheel", function (e) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (!mapZoomCtl || !document.contains(mapZoomCtl.wrap)) return;
+    if (!(e.target.closest && e.target.closest("#result-card"))) return;
+    e.preventDefault();
+    // マウスホイールは 1 ノッチ deltaY≈120 で exp 式だと一撃で 1/3 に
+    // なってしまう。1 イベントの変化量を ±1.5 倍にクランプする
+    // (トラックパッドのピンチは小刻みな delta で届くので影響しない)
+    var factor = Math.exp(-e.deltaY * 0.01);
+    factor = Math.max(1 / 1.5, Math.min(1.5, factor));
+    mapZoomCtl.zoomAt(e.clientX, e.clientY, state.mapZoom * factor);
+  }, { passive: false });
+
+  // --- Safari のトラックパッドピンチは wheel ではなく独自の gesture
+  //     イベント (gesturestart/change/end) で届く。e.scale = ピンチ開始時
+  //     からの倍率なので開始時の zoom に掛ける ---
+  var mapPinchBase = null;
+  document.addEventListener("gesturestart", function (e) {
+    if (!mapZoomCtl || !document.contains(mapZoomCtl.wrap)) return;
+    if (!(e.target.closest && e.target.closest("#result-card"))) return;
+    e.preventDefault();
+    mapPinchBase = state.mapZoom;
+  });
+  document.addEventListener("gesturechange", function (e) {
+    if (mapPinchBase === null) return;
+    if (!mapZoomCtl || !document.contains(mapZoomCtl.wrap)) return;
+    e.preventDefault();
+    mapZoomCtl.zoomAt(e.clientX, e.clientY, mapPinchBase * (e.scale || 1));
+  });
+  document.addEventListener("gestureend", function (e) {
+    if (mapPinchBase === null) return;
+    e.preventDefault();
+    mapPinchBase = null;
+  });
+  }
+
   function buildMapZoomBar(wrap) {
     var mapSvg = wrap.querySelector("svg");
     var naturalW = mapSvg ? parseFloat(mapSvg.getAttribute("width")) || 0 : 0;
@@ -1329,10 +1377,14 @@
       if (!mapSvg || !naturalW || !naturalH) return;
       var rect = wrap.getBoundingClientRect();
       var pad = mapWrapPadding(wrap);
+      // カーソルが地図枠の外 (ツールバー等) にあるピンチも受けるので、
+      // 基準点は枠内に収める
       var offsetX = (typeof clientX === "number" ? clientX : rect.left + rect.width / 2)
         - rect.left;
       var offsetY = (typeof clientY === "number" ? clientY : rect.top + rect.height / 2)
         - rect.top;
+      offsetX = Math.max(0, Math.min(rect.width, offsetX));
+      offsetY = Math.max(0, Math.min(rect.height, offsetY));
       var oldZoom = state.mapZoom;
       var contentX = (wrap.scrollLeft + offsetX - pad.left) / oldZoom;
       var contentY = (wrap.scrollTop + offsetY - pad.top) / oldZoom;
@@ -1341,38 +1393,12 @@
       wrap.scrollTop = contentY * state.mapZoom + pad.top - offsetY;
     }
 
-    // --- ⌘/Ctrl+ホイールでカーソル位置を中心にズーム。素のホイールは
-    //     preventDefault しないのでネイティブのスクロールに任せる。
-    //     Chrome/Edge/Firefox はトラックパッドのピンチも ctrlKey 付きの
-    //     wheel イベントとして届くので、この 1 本で両方に効く ---
-    wrap.addEventListener("wheel", function (e) {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      e.preventDefault();
-      // マウスホイールは 1 ノッチ deltaY≈120 で exp 式だと一撃で 1/3 に
-      // なってしまう。1 イベントの変化量を ±1.5 倍にクランプする
-      // (トラックパッドのピンチは小刻みな delta で届くので影響しない)
-      var factor = Math.exp(-e.deltaY * 0.01);
-      factor = Math.max(1 / 1.5, Math.min(1.5, factor));
-      zoomAt(e.clientX, e.clientY, state.mapZoom * factor);
-    }, { passive: false });
-
-    // --- Safari のトラックパッドピンチは wheel ではなく独自の gesture
-    //     イベント (gesturestart/change/end) で届く【ピンチが効かない実測の
-    //     原因】。e.scale = ピンチ開始時からの倍率なので開始時の zoom に掛ける ---
-    var pinchBase = null;
-    wrap.addEventListener("gesturestart", function (e) {
-      e.preventDefault();
-      pinchBase = state.mapZoom;
-    });
-    wrap.addEventListener("gesturechange", function (e) {
-      e.preventDefault();
-      if (pinchBase === null) return;
-      zoomAt(e.clientX, e.clientY, pinchBase * (e.scale || 1));
-    });
-    wrap.addEventListener("gestureend", function (e) {
-      e.preventDefault();
-      pinchBase = null;
-    });
+    // ホイール/ピンチの実処理は document 側の委譲リスナー 1 本に集約した
+    // (initMapZoomEvents)。ここでは「いま表示中の地図」を差し替えるだけ。
+    // wrap ごとにリスナーを張る方式だと、地図カードの余白 (ツールバーや
+    // サマリ行) にカーソルがあるときのピンチがブラウザのページズームに
+    // 吸われる【実測 2026-08-09: Chrome で「アプリ全体がズームされる」】。
+    mapZoomCtl = { wrap: wrap, zoomAt: zoomAt };
 
     // --- 背景ドラッグでパン。ノード/エッジ上から始めたドラッグはクリック
     //     操作を優先してパンしない ---

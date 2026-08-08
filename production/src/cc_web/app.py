@@ -21,7 +21,7 @@ from typing import Any
 
 from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -215,9 +215,16 @@ def create_app() -> FastAPI:
         return {"ok": True, "code": _code_revision(), "started_at": _STARTED_AT}
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html",
-                            headers={"Cache-Control": "no-cache"})
+    def index() -> HTMLResponse:
+        # __REV__ をコード版数に置換して app.js / app.css の URL を毎コミット
+        # 変える (キャッシュバスター)。Chrome の「通常リロード」は HTML だけ
+        # 再検証しサブリソースは古いキャッシュ規則のまま使うため、no-cache
+        # 導入前に取得された古い app.js が ⌘R では入れ替わらないことがある
+        # 【実測 2026-08-09: ズーム追加後も旧 JS が残りピンチが効かなかった】。
+        # URL が変われば別リソースなので必ず取り直される。
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        html = html.replace("__REV__", _code_revision())
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     @app.get("/api/me")
     def api_me() -> dict[str, Any]:
