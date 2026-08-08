@@ -2,6 +2,18 @@
    モックの配色・角丸・比率をそのまま実寸へ拡大した実装。
    外部フォント・CDN は使わない (閉域前提)。 */
 
+/* 地図の手書き風フォント (Excalidraw の描き味と揃える)。リポジトリに同梱した
+   Klee One (OFL ライセンス、static/fonts/OFL.txt) を self-host するので
+   閉域でも動く。UI 自体のフォントは変えない — 地図 SVG の font-family だけが
+   これを参照する (svg_export.FONT_STACK)。 */
+@font-face {
+  font-family: "Klee One";
+  src: url("/static/fonts/KleeOne-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --ink:#2C2C2A; --bg:#FDFDFC; --sidebar:#FAFAF8; --border:#E8E6E0;
   --muted:#5F5E5A; --faint:#888780; --placeholder:#B4B2A9; --input-border:#D3D1C7;

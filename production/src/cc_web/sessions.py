@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from cc_core import editing, gap_report, layers_store
+from cc_core import editing, gap_report, layers_store, svg_export
 from cc_core.community import LEVEL_ORDER, expand_aggregate
 from cc_core.detail import project
 from cc_core.evaluation import summarize
@@ -140,11 +140,19 @@ def session_detail(session: str) -> dict[str, Any]:
 
 
 def svg_file(session: str, level: str) -> Path:
-    """指定レベルの SVG を返す (plan より新しければキャッシュを再利用)。"""
+    """指定レベルの SVG を返す (plan より新しければキャッシュを再利用)。
+
+    plan だけでなく **レンダラ (svg_export.py) のソース更新時刻**とも比較する。
+    こうしないと描画コードを直しても古いセッションのキャッシュ SVG が
+    そのまま配信され続ける【実測 2026-08-08: フォントを手書き風に変えても
+    既存セッションの図が旧フォントのままに見えた】。
+    """
     check_level(level)
     src = plan_path(session)
+    renderer = Path(svg_export.__file__)
+    newest_input = max(src.stat().st_mtime, renderer.stat().st_mtime)
     out = Path(SVG_CACHE_DIR) / f"{session}_{level}.svg"
-    if out.exists() and out.stat().st_mtime >= src.stat().st_mtime:
+    if out.exists() and out.stat().st_mtime >= newest_input:
         return out
     plan = load_plan(session)
     write_svg(project(plan, level), out)

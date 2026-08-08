@@ -1324,28 +1324,55 @@
     // 初回適用 (レベル切替や編集後の再描画でも state.mapZoom を維持)
     applyZoom(state.mapZoom);
 
-    // --- ⌘/Ctrl+ホイールでカーソル位置を中心にズーム。素のホイールは
-    //     preventDefault しないのでネイティブのスクロールに任せる ---
-    wrap.addEventListener("wheel", function (e) {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      e.preventDefault();
+    // カーソル (ピンチ中心) の直下の点が動かないようにズームする共通処理
+    function zoomAt(clientX, clientY, newZoom) {
       if (!mapSvg || !naturalW || !naturalH) return;
       var rect = wrap.getBoundingClientRect();
       var pad = mapWrapPadding(wrap);
-      var offsetX = e.clientX - rect.left;
-      var offsetY = e.clientY - rect.top;
+      var offsetX = (typeof clientX === "number" ? clientX : rect.left + rect.width / 2)
+        - rect.left;
+      var offsetY = (typeof clientY === "number" ? clientY : rect.top + rect.height / 2)
+        - rect.top;
       var oldZoom = state.mapZoom;
       var contentX = (wrap.scrollLeft + offsetX - pad.left) / oldZoom;
       var contentY = (wrap.scrollTop + offsetY - pad.top) / oldZoom;
+      applyZoom(newZoom);
+      wrap.scrollLeft = contentX * state.mapZoom + pad.left - offsetX;
+      wrap.scrollTop = contentY * state.mapZoom + pad.top - offsetY;
+    }
+
+    // --- ⌘/Ctrl+ホイールでカーソル位置を中心にズーム。素のホイールは
+    //     preventDefault しないのでネイティブのスクロールに任せる。
+    //     Chrome/Edge/Firefox はトラックパッドのピンチも ctrlKey 付きの
+    //     wheel イベントとして届くので、この 1 本で両方に効く ---
+    wrap.addEventListener("wheel", function (e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
       // マウスホイールは 1 ノッチ deltaY≈120 で exp 式だと一撃で 1/3 に
       // なってしまう。1 イベントの変化量を ±1.5 倍にクランプする
       // (トラックパッドのピンチは小刻みな delta で届くので影響しない)
       var factor = Math.exp(-e.deltaY * 0.01);
       factor = Math.max(1 / 1.5, Math.min(1.5, factor));
-      applyZoom(oldZoom * factor);
-      wrap.scrollLeft = contentX * state.mapZoom + pad.left - offsetX;
-      wrap.scrollTop = contentY * state.mapZoom + pad.top - offsetY;
+      zoomAt(e.clientX, e.clientY, state.mapZoom * factor);
     }, { passive: false });
+
+    // --- Safari のトラックパッドピンチは wheel ではなく独自の gesture
+    //     イベント (gesturestart/change/end) で届く【ピンチが効かない実測の
+    //     原因】。e.scale = ピンチ開始時からの倍率なので開始時の zoom に掛ける ---
+    var pinchBase = null;
+    wrap.addEventListener("gesturestart", function (e) {
+      e.preventDefault();
+      pinchBase = state.mapZoom;
+    });
+    wrap.addEventListener("gesturechange", function (e) {
+      e.preventDefault();
+      if (pinchBase === null) return;
+      zoomAt(e.clientX, e.clientY, pinchBase * (e.scale || 1));
+    });
+    wrap.addEventListener("gestureend", function (e) {
+      e.preventDefault();
+      pinchBase = null;
+    });
 
     // --- 背景ドラッグでパン。ノード/エッジ上から始めたドラッグはクリック
     //     操作を優先してパンしない ---

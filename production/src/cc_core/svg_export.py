@@ -28,7 +28,14 @@ from cc_core.textmetrics import wrap_to_lines
 logger = get_logger("cc_core.svg_export")
 
 MARGIN = 40
-FONT_STACK = "'Hiragino Maru Gothic ProN','Hiragino Sans','Yu Gothic',sans-serif"
+# Klee One = 手書き (ペン書き) 風の日本語フォント。Web アプリが
+# /static/fonts/KleeOne-Regular.ttf を @font-face で配信するので、アプリ内
+# 表示は常に手書き風になる (Excalidraw の描き味と揃える)。ダウンロードした
+# .svg を単体で開いた場合はインストールされていなければ丸ゴシックへ
+# フォールバックする。幅の見積り (textmetrics) は全角 1em / 半角 0.55em の
+# 文字クラス方式でフォント非依存 — Klee One も同じ寸法規約なので影響なし。
+FONT_STACK = ("'Klee One','Hiragino Maru Gothic ProN','Hiragino Sans',"
+              "'Yu Gothic',sans-serif")
 AGGREGATE_FILL = "#e7f5ff"
 AGGREGATE_STROKE = "#1971c2"
 
