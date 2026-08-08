@@ -157,8 +157,12 @@ def _synth_kg(n: int, *, seed: int = 7, crowded: bool = False,
 
     crowded=False: 島の中で鎖状につながり、島をまたぐ関係が少し混じる
                    (実セッションと同じ形。ここは clean を維持すること)
-    crowded=True:  ほぼ全ての関係が島をまたぐ敵対的な形。逃げ場が無いラベルを
-                   意図的に作り、裁定 AC (短縮 → unresolved 報告) を検査する
+    crowded=True:  ほぼ全ての関係が島をまたぐ敵対的な形
+
+    注意: crowded=True は grid では逃げ場が無くなるが、レイアウト v3 (semantic)
+    は同じグラフを**解いてしまう** (島を広げてラベルの居場所を作る)。裁定 AC の
+    「短縮 → unresolved 報告」を調べる 4 本は、エンジンに依らず必然的に詰む
+    `_hopeless_kg` へ移した。
     """
     rnd = random.Random(seed)
     comms = max(1, n // 25)
@@ -190,6 +194,28 @@ def _synth_kg(n: int, *, seed: int = 7, crowded: bool = False,
     return {"graph_version": f"kg_s{n}", "nodes": nodes, "edges": edges,
             "communities": [{"id": cid(i), "name": f"テーマ{i}"}
                             for i in range(0, n, per)]}
+
+
+def _hopeless_kg(pairs: int = 3, dup: int = 14) -> dict:
+    """**構造的に**逃げ場が無いグラフ (裁定 AC の検査用)。
+
+    同じノード対を極端に長いラベル付きの多重エッジで結ぶ。ラベルの自然な位置
+    (両端の中点) は全部同じ 1 点で、候補列も完全に一致するので、どのレイアウト
+    エンジンで置こうと n-1 本は必ずどこかへ重なる — つまり「島を広げれば解ける」
+    という v3 の逃げ道が原理的に無い。grid / semantic どちらでも同じ結論になる。
+    """
+    label = "非常に長い関係の説明テキストです"
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    for p in range(pairs):
+        nodes += [{"id": f"h{p}a", "label": f"とても長い概念のラベル{p}A",
+                   "community_id": f"g{p}"},
+                  {"id": f"h{p}b", "label": f"とても長い概念のラベル{p}B",
+                   "community_id": f"g{p}"}]
+        edges += [{"id": f"m{p}_{k:02d}", "from": f"h{p}a", "to": f"h{p}b",
+                   "label": label, "glyph": "arrow"} for k in range(dup)]
+    return {"graph_version": "kg_hopeless", "nodes": nodes, "edges": edges,
+            "communities": [{"id": f"g{p}", "name": f"島{p}"} for p in range(pairs)]}
 
 
 def _load_session(name: str) -> dict:
@@ -347,7 +373,7 @@ def test_truncate_never_shrinks_more_than_40_percent():
 
 def test_truncate_kicks_in_when_every_candidate_is_blocked():
     """逃げ場が無いラベルは短縮して再挑戦する。"""
-    plan = compute_layout(_synth_kg(100, crowded=True))
+    plan = compute_layout(_hopeless_kg())
     placements = plan_label_layout(plan)
     truncated = [p for p in placements.values() if p.truncated]
     assert truncated, "敵対的な構成でも短縮が 1 本も起きていない"
@@ -358,7 +384,7 @@ def test_truncate_kicks_in_when_every_candidate_is_blocked():
 
 def test_unresolved_is_reported_instead_of_silently_overlapping():
     """全滅したラベルは最少交差に置いたうえで必ず報告する (黙って重ねない)。"""
-    plan = compute_layout(_synth_kg(100, crowded=True))
+    plan = compute_layout(_hopeless_kg())
     report = check_overlaps(plan)
     assert report.unresolved_labels, "unresolved が 1 件も報告されていない"
     # v1 で未検査だった label_on_label がここで初めて可視化される
@@ -521,7 +547,7 @@ def test_resolve_label_offset_keeps_backward_compatibility():
 
 def test_unresolved_labels_survive_the_layout_plan_schema():
     """plan に載せる形が schema を通る (root は additionalProperties:false)。"""
-    plan = compute_layout(_synth_kg(100, crowded=True))
+    plan = compute_layout(_hopeless_kg())
     report = check_overlaps(plan)
     assert report.unresolved_labels
     # pipeline が書く形と同じ (level を足す)
@@ -535,7 +561,7 @@ def test_render_cli_warns_about_unresolved_labels(tmp_path, monkeypatch, capsys)
     """受け入れ基準 4: 逃げ場が無いときは描画経路でも黙らず警告する。"""
     from cc_orchestrator import chat
 
-    plan = compute_layout(_synth_kg(100, crowded=True))
+    plan = compute_layout(_hopeless_kg())
     plan_file = tmp_path / "layout_plan_session_crowded.json"
     plan_file.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 

@@ -458,9 +458,15 @@
             "type": "string",
             "enum": [
               "semantic",
-              "grid_fallback"
+              "grid_fallback",
+              "grid_fallback_no_igraph"
             ],
-            "description": "レイアウト v3 §2: この島をどう組んだか。semantic = KK 等の意味的配置、grid_fallback = 制約スイープが解けずグリッドへ退避。grid エンジンではこのキー自体を付けない。"
+            "description": "レイアウト v3 §2: この島をどう組んだか。semantic = KK/層状/木 の意味的配置、grid_fallback = 制約スイープが解けずグリッドへ退避、grid_fallback_no_igraph = igraph が使えずグリッドへ退避 (環境の問題)。grid エンジンではこのキー自体を付けない。"
+          },
+          "sweeps": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "レイアウト v3 §2/§6: この島の制約スイープに要したパス数 (層状・横一列・grid 退避は 0)。summary の sweeps_max の元。"
           }
         }
       }

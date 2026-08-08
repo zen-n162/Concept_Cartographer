@@ -73,17 +73,21 @@ def edge_label_px(label: str, glyph: str) -> float:
     return em * EDGE_FONT + 10
 
 
-def compute_layout(kg: dict[str, Any], detail_level: str = "standard") -> dict[str, Any]:
+def compute_layout(kg: dict[str, Any], detail_level: str = "standard",
+                   *, anchors: dict[str, Any] | None = None) -> dict[str, Any]:
     """Compute a layout_plan from a knowledge graph, deterministically.
 
     レイアウト v3 設計書 §0: 入口はこの関数のまま、`CC_LAYOUT_ENGINE` を
     **呼び出し時に**読んで semantic (v3) と grid (下の従来実装) を分ける。
     既定は grid なので、フラグを立てない限り生成物は 1 バイトも変わらない。
+
+    `anchors` は v3 §3a のレベル間アンカー (detailed の島配置から作った方位)。
+    grid 経路は島を機械的に並べるだけなので**受け取っても無視する**。
     """
     from cc_core.layout_v3 import compute_layout_v3, semantic_enabled
 
     if semantic_enabled():
-        return compute_layout_v3(kg, detail_level)
+        return compute_layout_v3(kg, detail_level, anchors=anchors)
     return _compute_layout_grid(kg, detail_level)
 
 

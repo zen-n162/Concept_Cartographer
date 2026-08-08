@@ -24,10 +24,17 @@ from cc_core.community import (
     DetailAnalysis,
     analyze,
 )
+from cc_core.island_packing import anchors_from_plan
 from cc_core.layout import compute_layout
 from cc_core.logging_util import get_logger
 
 logger = get_logger("cc_core.detail")
+
+# レイアウト v3 §3a: 島の方位を決める基準レベルと、そのための計算順。
+# ANCHOR_ORDER は **LEVEL_ORDER の並べ替え** (基準の detailed を先頭に出すだけ)。
+# 格納順は LEVEL_ORDER のまま — 既存の plan 互換を壊さない。
+ANCHOR_LEVEL = "detailed"
+ANCHOR_ORDER: tuple[str, ...] = ("detailed", "standard", "overview")
 
 AGGREGATE_STYLE = {"rough": True, "backgroundColor": "#e7f5ff", "strokeColor": "#1971c2"}
 
@@ -179,9 +186,16 @@ def build_multilevel_plan(
     level_stats: dict[str, dict[str, int]] = {}
     all_aggregates: dict[str, dict[str, Any]] = {}
 
-    for level in LEVEL_ORDER:
+    # レイアウト v3 §3a: **detailed を最初に**計算し、その島配置を他レベルの
+    # 方位 (アンカー) にする。こうしないとレベルを切り替えたときに島が飛ぶ。
+    # `_level_plans` / `levels` への格納は下で LEVEL_ORDER に並べ直すので、
+    # 計算順を変えても plan の JSON は 1 バイトも変わらない (grid も semantic も)。
+    anchors: dict[str, Any] | None = None
+    for level in ANCHOR_ORDER:
         level_kg, aggs = _level_kg(kg, analysis, level)
-        plan = compute_layout(level_kg, detail_level=level)
+        plan = compute_layout(level_kg, detail_level=level, anchors=anchors)
+        if level == ANCHOR_LEVEL:
+            anchors = anchors_from_plan(plan)
 
         # 集約ノードは見た目を変えて「畳まれている」ことを示す
         agg_lookup = {a["id"]: a for a in aggs}
@@ -212,6 +226,10 @@ def build_multilevel_plan(
                 1 for n in analysis.visible[level] if n in analysis.pinned)
         for a in aggs:
             all_aggregates[a["id"]] = a
+
+    # 計算順 (§3a) に関わらず、格納順は LEVEL_ORDER で固定する
+    level_plans = {lv: level_plans[lv] for lv in LEVEL_ORDER}
+    level_stats = {lv: level_stats[lv] for lv in LEVEL_ORDER}
 
     # 既定レベルの plan を本体とし、他レベルを同梱する
     base = copy.deepcopy(level_plans[default_level])
