@@ -111,6 +111,7 @@
     offline: null,         // GET /api/evaluation/offline の直近の結果 (全セッション横断)
     editMode: false,
     pickFrom: null,        // 「関係を追加」の 1 個目に選んだノード id
+    mapZoom: 1.0,           // 地図の拡大率 (Excalidraw ライクなズーム)。セッションを開き直すと 1.0 に戻す
     files: [],             // inbox の一覧 (チップのメタ情報に使う)
     attachments: [],       // このページセッションでアップロードした名前
     knownSessions: {},     // 履歴にある session id (QA の出典を開けるか判定する)
@@ -849,6 +850,7 @@
     state.tab = "map";
     state.editMode = false;
     state.pickFrom = null;
+    state.mapZoom = 1.0;
 
     var card = el("div", "card");
     card.id = "result-card";
@@ -1248,12 +1250,151 @@
     bar.appendChild(links);
     body.appendChild(bar);
 
+    var outer = el("div", "map-outer");
     var wrap = el("div", "map-wrap" + (state.editMode ? " is-editing" : ""));
     // サーバが生成した SVG のみ innerHTML で展開する (ユーザー入力は入らない)
     wrap.innerHTML = state.svg;
     wrap.addEventListener("click", onMapClick);
-    body.appendChild(wrap);
+    outer.appendChild(wrap);
+    outer.appendChild(buildMapZoomBar(wrap));
+    body.appendChild(outer);
     if (state.pickFrom && state.pickFrom !== "await") markPick(wrap, state.pickFrom);
+  }
+
+  // ---------------------------------------------------------- 地図ズーム/パン
+  // Excalidraw ライクな操作: ⌘/Ctrl+ホイールでカーソル位置を中心にズーム、
+  // 背景ドラッグでパン、左下のズームバーで +/-/100%/全体表示。
+  // CSS transform ではなく SVG 自体の width/height 属性を書き換える方式
+  // (viewBox は不変) — ベクタなので拡大しても鮮明で、スクロール範囲も自動で
+  // 合い、既存のクリック/scrollIntoView/ポップオーバーの座標計算がそのまま動く。
+  function clampZoom(z) { return Math.max(0.1, Math.min(5.0, z)); }
+
+  // click イベントは pointerup の後に発火するため、パン確定後の 1 回だけ
+  // 抑止するフラグ。wrap は renderResult のたびに作り直すが、onMapClick は
+  // 使い回しの単一関数なのでモジュール変数で受け渡す。
+  var mapPanSuppressClick = false;
+
+  function buildMapZoomBar(wrap) {
+    var mapSvg = wrap.querySelector("svg");
+    var naturalW = mapSvg ? parseFloat(mapSvg.getAttribute("width")) || 0 : 0;
+    var naturalH = mapSvg ? parseFloat(mapSvg.getAttribute("height")) || 0 : 0;
+
+    function applyZoom(zoom) {
+      state.mapZoom = clampZoom(zoom);
+      if (mapSvg && naturalW && naturalH) {
+        mapSvg.setAttribute("width", naturalW * state.mapZoom);
+        mapSvg.setAttribute("height", naturalH * state.mapZoom);
+      }
+      label.textContent = Math.round(state.mapZoom * 100) + "%";
+    }
+
+    var bar = el("div", "map-zoombar");
+    var btnOut = el("button", "zoom-btn", "−");
+    btnOut.type = "button";
+    btnOut.title = "縮小";
+    btnOut.addEventListener("click", function () { applyZoom(state.mapZoom * 0.8); });
+    var label = el("button", "zoom-label", Math.round(state.mapZoom * 100) + "%");
+    label.type = "button";
+    label.title = "クリックで 100% に戻します (⌘/Ctrl+ホイール、トラックパッドのピンチでも拡大縮小できます)";
+    label.addEventListener("click", function () { applyZoom(1.0); });
+    var btnIn = el("button", "zoom-btn", "+");
+    btnIn.type = "button";
+    btnIn.title = "拡大";
+    btnIn.addEventListener("click", function () { applyZoom(state.mapZoom * 1.25); });
+    var btnFit = el("button", "zoom-btn zoom-fit", "全体表示");
+    btnFit.type = "button";
+    btnFit.title = "図全体が枠に収まる大きさにします";
+    btnFit.addEventListener("click", function () {
+      if (!naturalW || !naturalH) return;
+      var pad = mapWrapPadding(wrap);
+      var availW = wrap.clientWidth - pad.left - pad.right;
+      // 高さは今の clientHeight ではなく CSS の max-height (66vh) を基準に
+      // する — 縮小中は枠が内容に合わせて縮んでいるので、そのまま使うと
+      // 「全体表示」を押しても小さいままになる
+      var availH = Math.max(wrap.clientHeight,
+        Math.round(window.innerHeight * 0.66)) - pad.top - pad.bottom;
+      var fit = Math.min(availW / naturalW, availH / naturalH, 1.0);
+      applyZoom(fit > 0 ? fit : 1.0);
+    });
+    bar.appendChild(btnOut);
+    bar.appendChild(label);
+    bar.appendChild(btnIn);
+    bar.appendChild(btnFit);
+
+    // 初回適用 (レベル切替や編集後の再描画でも state.mapZoom を維持)
+    applyZoom(state.mapZoom);
+
+    // --- ⌘/Ctrl+ホイールでカーソル位置を中心にズーム。素のホイールは
+    //     preventDefault しないのでネイティブのスクロールに任せる ---
+    wrap.addEventListener("wheel", function (e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      if (!mapSvg || !naturalW || !naturalH) return;
+      var rect = wrap.getBoundingClientRect();
+      var pad = mapWrapPadding(wrap);
+      var offsetX = e.clientX - rect.left;
+      var offsetY = e.clientY - rect.top;
+      var oldZoom = state.mapZoom;
+      var contentX = (wrap.scrollLeft + offsetX - pad.left) / oldZoom;
+      var contentY = (wrap.scrollTop + offsetY - pad.top) / oldZoom;
+      // マウスホイールは 1 ノッチ deltaY≈120 で exp 式だと一撃で 1/3 に
+      // なってしまう。1 イベントの変化量を ±1.5 倍にクランプする
+      // (トラックパッドのピンチは小刻みな delta で届くので影響しない)
+      var factor = Math.exp(-e.deltaY * 0.01);
+      factor = Math.max(1 / 1.5, Math.min(1.5, factor));
+      applyZoom(oldZoom * factor);
+      wrap.scrollLeft = contentX * state.mapZoom + pad.left - offsetX;
+      wrap.scrollTop = contentY * state.mapZoom + pad.top - offsetY;
+    }, { passive: false });
+
+    // --- 背景ドラッグでパン。ノード/エッジ上から始めたドラッグはクリック
+    //     操作を優先してパンしない ---
+    var pan = null;
+    wrap.addEventListener("pointerdown", function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      var onElement = e.target.closest
+        && (e.target.closest(".cc-node") || e.target.closest(".cc-edge"));
+      if (onElement) return;
+      pan = {
+        x: e.clientX, y: e.clientY, pointerId: e.pointerId,
+        scrollLeft: wrap.scrollLeft, scrollTop: wrap.scrollTop, moved: false
+      };
+    });
+    wrap.addEventListener("pointermove", function (e) {
+      if (!pan || pan.pointerId !== e.pointerId) return;
+      var dx = e.clientX - pan.x;
+      var dy = e.clientY - pan.y;
+      if (!pan.moved) {
+        if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        pan.moved = true;
+        try { wrap.setPointerCapture(e.pointerId); } catch (err) { /* 無視 */ }
+        wrap.classList.add("is-panning");
+      }
+      wrap.scrollLeft = pan.scrollLeft - dx;
+      wrap.scrollTop = pan.scrollTop - dy;
+    });
+    function endPan(e) {
+      if (!pan || pan.pointerId !== e.pointerId) return;
+      if (pan.moved) {
+        mapPanSuppressClick = true;
+        wrap.classList.remove("is-panning");
+        try { wrap.releasePointerCapture(pan.pointerId); } catch (err) { /* 無視 */ }
+      }
+      pan = null;
+    }
+    wrap.addEventListener("pointerup", endPan);
+    wrap.addEventListener("pointercancel", endPan);
+
+    return bar;
+  }
+
+  // .map-wrap の padding (CSS で 6px 固定だが計算値から拾って安全に保つ)
+  function mapWrapPadding(wrap) {
+    var cs = getComputedStyle(wrap);
+    return {
+      left: parseFloat(cs.paddingLeft) || 0, top: parseFloat(cs.paddingTop) || 0,
+      right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0
+    };
   }
 
   var EXCALIDRAW_BTN_LABEL = " Excalidraw で開く";
@@ -1312,6 +1453,7 @@
 
   // ---------------------------------------------------------- 地図クリック
   function onMapClick(event) {
+    if (mapPanSuppressClick) { mapPanSuppressClick = false; return; }
     var target = event.target;
     var node = target.closest ? target.closest(".cc-node") : null;
     if (node) {
