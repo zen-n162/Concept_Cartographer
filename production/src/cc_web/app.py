@@ -216,7 +216,8 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+        return FileResponse(STATIC_DIR / "index.html",
+                            headers={"Cache-Control": "no-cache"})
 
     @app.get("/api/me")
     def api_me() -> dict[str, Any]:
@@ -557,9 +558,23 @@ def create_app() -> FastAPI:
     def api_history() -> dict[str, Any]:
         return {"items": jobs_mod.read_history()}
 
-    # 静的配信は最後に (API パスを食わないよう /static 配下に限定)
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    # 静的配信は最後に (API パスを食わないよう /static 配下に限定)。
+    # Cache-Control を付けないとブラウザのヒューリスティックキャッシュが
+    # 古い app.js をサーバに聞かずに使い続け、**アプリを更新しても
+    # 再読み込みで新機能が出ない**【実測 2026-08-08: 地図ズーム追加後も
+    # 旧 JS が動き続け「昔の図はズームが効かない」ように見えた】。
+    # no-cache = 毎回 ETag で再検証 (ローカル配信なのでコストは無視できる)
+    app.mount("/static", _NoCacheStatic(directory=STATIC_DIR), name="static")
     return app
+
+
+class _NoCacheStatic(StaticFiles):
+    """更新が即座に届く静的配信 (ETag 再検証は残るので転送は 304 で済む)。"""
+
+    def file_response(self, *args: Any, **kwargs: Any):  # type: ignore[override]
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 app = create_app()
