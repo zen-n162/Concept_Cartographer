@@ -161,7 +161,13 @@ async def render_layout_plan(
                     "type": "rectangle",
                     "x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0,
                     "strokeColor": "#868e96" if is_gap else "#495057",
-                    "backgroundColor": "transparent",
+                    # レイアウト v3 §5: 島の淡い地色。ギャップ島 (と grid
+                    # エンジンの plan) には tint が無いので従来どおり透明。
+                    # fillStyle は Excalidraw 既定が hachure (斜線) なので、
+                    # 淡色がベタ塗りになるよう solid を明示 (excalidraw_file と
+                    # 三面一致。tint 無しの transparent には効かず無害)。
+                    "backgroundColor": island.get("tint") or "transparent",
+                    "fillStyle": "solid",
                     "strokeStyle": "dashed" if is_gap else "solid",
                     "strokeWidth": 1,
                     "roughness": 2,

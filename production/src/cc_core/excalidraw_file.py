@@ -78,6 +78,9 @@ def build_scene(plan: dict[str, Any]) -> dict[str, Any]:
             island_element_id(island["community_id"]), "rectangle",
             x0, y0, x1 - x0, y1 - y0,
             strokeColor=color, strokeStyle="dashed" if is_gap else "solid",
+            # レイアウト v3 §5: 島の淡い地色。ギャップ島 (と grid エンジンの
+            # plan) には tint が無いので _base の既定 (transparent) のまま。
+            backgroundColor=island.get("tint") or "transparent",
             opacity=opacity))
         elements.append(_text(
             island_label_id(island["community_id"]), x0 + 10, y0 + 8,

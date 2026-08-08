@@ -50,6 +50,8 @@ EDGE_FIELDS = ("id", "from", "to", "label", "glyph", "confidence",
 NODE_FIELDS = ("id", "label", "kind", "community_id", "importance",
                "aggregate_id", "visible_at", "origin",
                "onto_class", "claim_refs")
+# 島のうち「semantic エンジンのときだけ載る」項目。値が無ければキーごと落とす。
+ISLAND_OPTIONAL_FIELDS = ("layout_mode", "tint")
 
 
 class SessionNotFound(LookupError):
@@ -167,14 +169,15 @@ def view_of(session: str, level: str) -> dict[str, Any]:
         "aggregates": view.get("aggregates", []),
         "gaps": view.get("gaps", []),
         "levels": view.get("levels", {}),
-        # layout_mode (レイアウト v3 §2) は semantic エンジンのときだけ島に載る。
-        # 無いときはキーごと出さない — grid で作った既存セッションの応答を
-        # 変えないため (UI は知らないキーを無視する)。
+        # layout_mode (レイアウト v3 §2) と tint (§5) は semantic エンジンの
+        # ときだけ島に載る。無いときはキーごと出さない — grid で作った既存
+        # セッションの応答を変えないため (UI は知らないキーを無視する)。
         "islands": [
             {k: v for k, v in (("community_id", i.get("community_id")),
                                ("name", i.get("name")),
-                               ("layout_mode", i.get("layout_mode")))
-             if not (k == "layout_mode" and v is None)}
+                               ("layout_mode", i.get("layout_mode")),
+                               ("tint", i.get("tint")))
+             if not (k in ISLAND_OPTIONAL_FIELDS and v is None)}
             for i in view.get("islands", [])
         ],
         # 裁定 AO: Standard と Detailed が同数で、かつ資料からこれ以上は

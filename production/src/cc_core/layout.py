@@ -54,6 +54,14 @@ GLYPH_PREFIX_EM = {"arrow": 0.0, "wave": 1.6, "zigzag": 1.6, "double": 1.6,
                    "hole": 1.6, "tension": 1.6,
                    "isa": 1.6, "partof": 1.6, "precedes": 1.6, "question": 1.1}
 
+# レイアウト v3 §4: 「この kg ノードは集約ノード」を生成側 (detail._level_kg) から
+# レイアウトへ伝えるための私的フラグ。集約は重要度ではなくメンバー数を代弁するので
+# サイズ係数を固定にする — そのためにレイアウトが種別を知る必要がある。
+# **plan には出さない** (下の除外リストと layout_v3._NODE_RESERVED で落とす)。
+# node["kind"] を使わないのは、kind を kg 側で先に立てるとキーの並びが変わって
+# grid のバイト等価が崩れるため (build_multilevel_plan が後から付け直す設計)。
+AGGREGATE_MARK = "_aggregate"
+
 
 def node_size(label: str) -> tuple[float, float]:
     """ラベルが収まる楕円の (幅, 高さ) を返す。"""
@@ -92,8 +100,16 @@ def compute_layout(kg: dict[str, Any], detail_level: str = "standard",
 
 
 def _compute_layout_grid(kg: dict[str, Any],
-                         detail_level: str = "standard") -> dict[str, Any]:
-    """従来の text-aware grid (v3 でも島単位のフォールバック先として恒久保守)。"""
+                         detail_level: str = "standard",
+                         *, sizes: dict[str, tuple[float, float]] | None = None,
+                         ) -> dict[str, Any]:
+    """従来の text-aware grid (v3 でも島単位のフォールバック先として恒久保守)。
+
+    `sizes` は v3 §4 のサイズ係数を適用済みのノード寸法。v3 が島単位で退避する
+    ときだけ渡す — 退避した島だけノードが小さいと同じ図の中で不揃いになるため。
+    省略時 (= grid エンジン本来の経路) は従来どおり自分で node_size() を引くので、
+    生成物はバイト等価のまま。
+    """
     kg_nodes: list[dict[str, Any]] = kg.get("nodes", [])
     kg_edges: list[dict[str, Any]] = kg.get("edges", [])
     communities: dict[str, dict[str, Any]] = {
@@ -128,7 +144,8 @@ def _compute_layout_grid(kg: dict[str, Any],
         groups.setdefault(n.get("community_id") or "comm_default", []).append(n)
 
     # ノードごとの寸法を先に決める
-    sizes = {n["id"]: node_size(n["label"]) for n in kg_nodes}
+    if sizes is None:
+        sizes = {n["id"]: node_size(n["label"]) for n in kg_nodes}
 
     # 島が多いときは横一列に伸ばさず格子に折り返す
     islands_per_row = max(1, math.ceil(math.sqrt(len(groups))))
@@ -200,7 +217,7 @@ def _compute_layout_grid(kg: dict[str, Any],
             # 上位層が付けた属性 (evidence_span / mentions / novelty 等) を引き継ぐ
             node = {k: v for k, v in n.items()
                     if k not in ("id", "label", "x", "y", "size", "height",
-                                 "community_id", "style")}
+                                 "community_id", "style", AGGREGATE_MARK)}
             node.update({
                 "id": n["id"],
                 "label": n["label"],

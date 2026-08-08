@@ -20,10 +20,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 from test_overlap import _synth_kg                     # noqa: E402  合成 KG を流用
 
-from cc_core import layout_v3                          # noqa: E402
+from cc_core import layout, layout_v3                  # noqa: E402
 from cc_core.community import analyze                  # noqa: E402
 from cc_core.detail import _level_kg, build_multilevel_plan, project  # noqa: E402
-from cc_core.layout import compute_layout              # noqa: E402
+from cc_core.layout import compute_layout, node_size   # noqa: E402
 from cc_core.overlap import check_overlaps, clear_label_plan_cache  # noqa: E402
 from cc_core.validate import validate_layout_plan      # noqa: E402
 
@@ -90,17 +90,31 @@ def test_grid_output_is_byte_identical_to_the_pre_v3_baseline(monkeypatch):
     assert fresh == golden
 
 
-def test_default_engine_stays_on_the_grid_path(monkeypatch):
-    """フラグ未設定・空・未知の値はすべて grid (誤記で本番が変わらないこと)。"""
-    for value in (None, "", "  ", "GRID", "kk", "semantic-ish"):
+def test_default_engine_is_semantic_after_the_l3_flip(monkeypatch):
+    """L3 の既定は semantic。未設定・空・未知の値はすべて既定に倒れる (§8-1)。"""
+    for value in (None, "", "  ", "kk", "semantic-ish"):
         if value is None:
             monkeypatch.delenv("CC_LAYOUT_ENGINE", raising=False)
         else:
             monkeypatch.setenv("CC_LAYOUT_ENGINE", value)
+        assert layout_v3.engine_name() == "semantic"
+        plan = compute_layout(_kg())
+        assert plan["provenance"]["layout_engine"] == layout_v3.LAYOUT_ENGINE_ID
+
+
+def test_grid_stays_reachable_as_the_escape_hatch(monkeypatch):
+    """`CC_LAYOUT_ENGINE=grid` で完全に旧挙動へ戻せること (§8-6)。
+
+    大文字・前後の空白も受ける — 安全弁は使うのが緊急時なので緩く取る。
+    """
+    for value in ("grid", "GRID", "  Grid "):
+        monkeypatch.setenv("CC_LAYOUT_ENGINE", value)
         assert layout_v3.engine_name() == "grid"
         plan = compute_layout(_kg())
         assert plan["provenance"]["layout_engine"] == "cc_core.layout/0.2 text-aware-grid"
-        assert all("layout_mode" not in i for i in plan["islands"])
+        # grid の島は v3 のキーを 1 つも持たない (既存 plan とバイト等価)
+        assert all(not {"layout_mode", "sweeps", "tint"} & set(i)
+                   for i in plan["islands"])
 
 
 # --------------------------------------------------------------------------
@@ -648,3 +662,250 @@ def test_new_skeletons_stay_clean_at_scale(semantic, shape, k):
             assert placed[e["from"]]["x"] < placed[e["to"]]["x"], e["id"]
         if e["glyph"] == "isa":
             assert placed[e["to"]]["y"] < placed[e["from"]]["y"], e["id"]
+
+
+# --------------------------------------------------------------------------
+# 15. §4 サイズ (重要度でノードを大きくする)
+# --------------------------------------------------------------------------
+
+def _one_node_kg(importance: float | None, **extra) -> dict:
+    node: dict = {"id": "n0", "label": "概念", "community_id": "c0", **extra}
+    if importance is not None:
+        node["importance"] = {"betweenness": 0.0, "frequency": 0.0,
+                              "novelty": 0.0, "total": importance}
+    return {"graph_version": "kg_size", "nodes": [node], "edges": [],
+            "communities": [{"id": "c0", "name": "島"}]}
+
+
+@pytest.mark.parametrize("total,expected", [(0.0, 0.9), (0.5, 1.15), (1.0, 1.4)])
+def test_importance_scales_the_node_but_not_the_font(semantic, total, expected):
+    """§4: 係数 = 0.9 + 0.5 × importance.total。幅も高さも同じ係数で伸びる。"""
+    base_w, base_h = node_size("概念")
+    node = compute_layout(_one_node_kg(total))["nodes"][0]
+    assert node["size"] == round(base_w * expected)
+    assert node["height"] == round(base_h * expected)
+    # フォントは不変 (§4: 可読性と検証 digest を守る)
+    assert layout.NODE_FONT == 14 and layout.EDGE_FONT == 12
+
+
+def test_importance_is_clamped_and_missing_importance_is_the_floor(semantic):
+    """importance が無い / 壊れている KG でも落ちず、基準倍率に収まる。"""
+    base_w, _h = node_size("概念")
+    for bad in (None, {"total": "壊れた値"}, {"total": 9.0}, {"total": -3.0}, "文字列"):
+        kg = _one_node_kg(None)
+        if bad is not None:
+            kg["nodes"][0]["importance"] = bad
+        node = compute_layout(kg)["nodes"][0]
+        assert round(base_w * 0.9) <= node["size"] <= round(base_w * 1.4)
+    # 上限 1.4 を超えない
+    assert compute_layout(_one_node_kg(1.0))["nodes"][0]["size"] == round(base_w * 1.4)
+
+
+def test_isa_parent_gets_the_extra_ten_percent(semantic):
+    """§4: isa の親側 (上位概念) だけ +0.1。子側は素の係数のまま。"""
+    kg = {
+        "graph_version": "kg_isa", "nodes": [
+            {"id": "parent", "label": "概念", "community_id": "c0"},
+            {"id": "child", "label": "概念", "community_id": "c0"},
+        ],
+        "edges": [{"id": "e0", "from": "child", "to": "parent",
+                   "label": "の一種", "glyph": "isa"}],
+        "communities": [{"id": "c0", "name": "島"}],
+    }
+    by_id = {n["id"]: n for n in compute_layout(kg)["nodes"]}
+    base_w, _h = node_size("概念")
+    assert by_id["parent"]["size"] == round(base_w * 1.0)   # 0.9 + 0.1
+    assert by_id["child"]["size"] == round(base_w * 0.9)
+    assert by_id["parent"]["size"] > by_id["child"]["size"]
+
+
+def test_isa_parent_bonus_still_respects_the_cap(semantic):
+    """重要度 1.0 の isa 親でも 1.4 を超えない (0.9+0.5+0.1 = 1.5 を切り詰める)。"""
+    kg = _one_node_kg(1.0)
+    kg["nodes"].append({"id": "n1", "label": "概念", "community_id": "c0"})
+    kg["edges"] = [{"id": "e0", "from": "n1", "to": "n0",
+                    "label": "の一種", "glyph": "isa"}]
+    by_id = {n["id"]: n for n in compute_layout(kg)["nodes"]}
+    assert by_id["n0"]["size"] == round(node_size("概念")[0] * 1.4)
+
+
+def test_aggregate_nodes_keep_a_fixed_factor(semantic):
+    """§4: 集約ノードは重要度ではなくメンバー数の代弁なので 1.15 固定。"""
+    base_w, base_h = node_size("概念")
+    kg = _one_node_kg(1.0, **{layout.AGGREGATE_MARK: True})
+    node = compute_layout(kg)["nodes"][0]
+    assert (node["size"], node["height"]) == (round(base_w * 1.15),
+                                              round(base_h * 1.15))
+    # 私的フラグは plan に漏れない
+    assert layout.AGGREGATE_MARK not in node
+
+
+def test_aggregate_marking_survives_the_multilevel_pipeline(semantic):
+    """実 KG の overview で、集約ノードが 1.15 固定として組まれていること。"""
+    kg = json.loads((FIXTURES / "kg_sample.json").read_text(encoding="utf-8"))
+    plan = build_multilevel_plan(kg)
+    for level in LEVEL_ORDER:
+        for n in plan["_level_plans"][level]["nodes"]:
+            assert layout.AGGREGATE_MARK not in n
+            if n.get("kind") == "aggregate":
+                assert n["size"] == min(layout_v3.SIZE_W_MAX,
+                                        round(node_size(n["label"])[0] * 1.15))
+
+
+def test_size_differences_are_visible_on_a_real_session(semantic):
+    """実 KG で「大きいノードと小さいノード」の差が実際に出ること。"""
+    kg = json.loads((FIXTURES / "kg_sample.json").read_text(encoding="utf-8"))
+    plan = build_multilevel_plan(kg)
+    nodes = plan["_level_plans"]["detailed"]["nodes"]
+    ratios = [n["size"] / node_size(n["label"])[0] for n in nodes]
+    assert min(ratios) >= 0.9 - 1e-6 and max(ratios) <= 1.4 + 1e-6
+    assert max(ratios) - min(ratios) > 0.05, "重要度によるサイズ差が出ていない"
+
+
+def test_grid_engine_sizes_are_untouched(monkeypatch):
+    """§4 は semantic 経路だけ。grid のサイズは node_size() そのまま。"""
+    monkeypatch.setenv("CC_LAYOUT_ENGINE", "grid")
+    for total in (0.0, 1.0):
+        node = compute_layout(_one_node_kg(total))["nodes"][0]
+        assert (node["size"], node["height"]) == node_size("概念")
+
+
+# --------------------------------------------------------------------------
+# 16. §5 島ティント
+# --------------------------------------------------------------------------
+
+def test_tint_cycles_through_the_palette_in_canonical_order(semantic):
+    """§5: community_id の辞書順でパレットを巡回。9 島目で先頭へ戻る。"""
+    n_comm = len(layout_v3.ISLAND_TINTS) + 1
+    kg = {
+        "graph_version": "kg_tint",
+        "nodes": [{"id": f"n{i:02d}", "label": f"概念{i}",
+                   "community_id": f"c{i:02d}"} for i in range(n_comm)],
+        "edges": [],
+        "communities": [{"id": f"c{i:02d}", "name": f"島{i}"} for i in range(n_comm)],
+    }
+    tints = {i["community_id"]: i["tint"] for i in compute_layout(kg)["islands"]}
+    for idx in range(n_comm):
+        assert tints[f"c{idx:02d}"] == layout_v3.ISLAND_TINTS[idx % 8]
+    assert tints["c08"] == tints["c00"], "9 島目でパレットが巡回していない"
+
+
+def test_tint_is_deterministic_and_independent_of_input_order(semantic):
+    """正準順で決めるので、KG のノード並びを変えても色は動かない。"""
+    kg = _kg(12, comms=3)
+    first = {i["community_id"]: i["tint"] for i in compute_layout(kg)["islands"]}
+    shuffled = dict(kg, nodes=list(reversed(kg["nodes"])))
+    second = {i["community_id"]: i["tint"] for i in compute_layout(shuffled)["islands"]}
+    assert first == second
+
+
+def test_gap_islands_stay_grey_and_untinted(semantic):
+    """§5: ギャップ島は灰破線のまま。ティントは付けない。"""
+    kg = _kg(9, comms=3)
+    kg["communities"][1]["is_gap"] = True
+    islands = compute_layout(kg)["islands"]
+    gaps = [i for i in islands if i["is_gap"]]
+    assert len(gaps) == 1
+    assert all("tint" not in i for i in gaps)
+    assert all(i["tint"] in layout_v3.ISLAND_TINTS for i in islands if not i["is_gap"])
+
+
+def test_tint_survives_the_layout_plan_schema(semantic):
+    """3 点セットその 1: schema (閉じたオブジェクトなので登録漏れは即死する)。"""
+    plan = compute_layout(_kg())
+    assert all("tint" in i for i in plan["islands"])
+    check = validate_layout_plan(plan)
+    assert check.valid, check.errors[:3]
+
+
+class _Recorder:
+    """MCP クライアントの代役 (create_element の引数を覚えるだけ)。"""
+
+    def __init__(self) -> None:
+        self.created: dict[str, dict] = {}
+
+    async def call(self, tool: str, args: dict | None = None):
+        if tool == "create_element" and args:
+            self.created[args["id"]] = args
+        return "{}"
+
+
+def _canvas_elements(plan: dict) -> dict[str, dict]:
+    import asyncio
+
+    from cc_core.adapter import render_layout_plan
+
+    client = _Recorder()
+    result = asyncio.run(render_layout_plan(plan, client))
+    assert result.success, result.errors
+    return client.created
+
+
+def test_tint_reaches_all_three_renderers(semantic):
+    """3 点セットその 3: canvas 用 adapter / SVG / .excalidraw の三面一致 (§5)。"""
+    from cc_core.adapter import island_element_id
+    from cc_core.excalidraw_file import build_scene
+    from cc_core.svg_export import build_svg
+
+    plan = compute_layout(_kg(9, comms=3))
+    tints = {i["community_id"]: i["tint"] for i in plan["islands"]}
+    assert len(set(tints.values())) == 3, "島ごとに違う色が付いていない"
+
+    # (a) canvas (MCP create_element の引数)
+    canvas = _canvas_elements(plan)
+    # (b) .excalidraw ファイル
+    scene = {e["id"]: e for e in build_scene(plan)["elements"]}
+    for cid, tint in tints.items():
+        assert canvas[island_element_id(cid)]["backgroundColor"] == tint
+        assert scene[island_element_id(cid)]["backgroundColor"] == tint
+        # 淡色をベタ塗りで見せる (hachure だと縞になって読みにくい)
+        assert scene[island_element_id(cid)]["fillStyle"] == "solid"
+
+    # (c) SVG
+    svg = build_svg(plan)
+    for tint in set(tints.values()):
+        assert f'fill="{tint}"' in svg
+
+
+def test_renderers_fall_back_to_no_fill_without_a_tint(monkeypatch):
+    """grid で作った plan (tint なし) の三面は従来どおり塗らない。"""
+    from cc_core.adapter import island_element_id
+    from cc_core.excalidraw_file import build_scene
+    from cc_core.svg_export import build_svg
+
+    monkeypatch.setenv("CC_LAYOUT_ENGINE", "grid")
+    plan = compute_layout(_kg())
+    cid = plan["islands"][0]["community_id"]
+    assert _canvas_elements(plan)[
+        island_element_id(cid)]["backgroundColor"] == "transparent"
+    assert {e["id"]: e for e in build_scene(plan)["elements"]}[
+        island_element_id(cid)]["backgroundColor"] == "transparent"
+    assert 'fill="none"' in build_svg(plan)
+
+
+# --------------------------------------------------------------------------
+# 17. §6 provenance の統一
+# --------------------------------------------------------------------------
+
+def test_semantic_provenance_is_uniform_across_base_and_levels(semantic):
+    """§6: base も全 _level_plans も "cc_core.layout/3.0 semantic"。"""
+    kg = json.loads((FIXTURES / "kg_sample.json").read_text(encoding="utf-8"))
+    plan = build_multilevel_plan(kg)
+    assert plan["provenance"]["layout_engine"] == layout_v3.LAYOUT_ENGINE_ID
+    for level in LEVEL_ORDER:
+        assert (plan["_level_plans"][level]["provenance"]["layout_engine"]
+                == layout_v3.LAYOUT_ENGINE_ID)
+        assert (project(plan, level)["provenance"]["layout_engine"]
+                == layout_v3.LAYOUT_ENGINE_ID)
+
+
+def test_grid_provenance_keeps_the_legacy_names(monkeypatch):
+    """grid 経路の provenance は従来値のまま (旧 plan と読み分けない)。"""
+    monkeypatch.setenv("CC_LAYOUT_ENGINE", "grid")
+    kg = json.loads((FIXTURES / "kg_sample.json").read_text(encoding="utf-8"))
+    plan = build_multilevel_plan(kg)
+    assert plan["provenance"]["layout_engine"] == "cc_core.detail/1.0 multilevel"
+    assert (plan["_level_plans"]["standard"]["provenance"]["layout_engine"]
+            == "cc_core.layout/0.2 text-aware-grid")
+
+

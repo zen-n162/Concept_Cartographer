@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import math
 import os
-from typing import Any, NamedTuple
+from typing import Any, Iterable, NamedTuple
 
 from cc_core.island_packing import Island, pack_islands
 from cc_core.layout import (
+    AGGREGATE_MARK,
     COL_MARGIN,
     EDGE_FONT,
     EDGE_LABEL_MAX_EM,
@@ -47,10 +48,11 @@ from cc_core.textmetrics import truncate
 
 logger = get_logger("cc_core.layout_v3")
 
-# --- エンジン選択 (L3 で既定を semantic へ倒すまでは grid) ---
+# --- エンジン選択 (L3 で既定は semantic。grid は明示指定で残る安全弁) ---
 ENGINE_ENV = "CC_LAYOUT_ENGINE"
 ENGINE_GRID = "grid"
 ENGINE_SEMANTIC = "semantic"
+ENGINE_DEFAULT = ENGINE_SEMANTIC
 LAYOUT_ENGINE_ID = "cc_core.layout/3.0 semantic"
 
 # --- §1 骨格の種類 ---
@@ -89,17 +91,50 @@ FAIL_NO_IGRAPH = "no_igraph"
 FAIL_SWEEP = "sweep"
 _FAIL_TO_MODE = {FAIL_NO_IGRAPH: MODE_GRID_NO_IGRAPH, FAIL_SWEEP: MODE_GRID_FALLBACK}
 
-_NODE_RESERVED = ("id", "label", "x", "y", "size", "height", "community_id", "style")
+_NODE_RESERVED = ("id", "label", "x", "y", "size", "height", "community_id", "style",
+                  AGGREGATE_MARK)
+
+# --- §4 サイズ (重要度でノードを大きくする。semantic 経路だけ) ---
+# 基本寸法 = node_size() の結果 (ラベル適合) に **後から**係数を掛ける。
+# フォントサイズは変えない — 可読性と検証 digest を守るため (§4)。
+SIZE_BASE = 0.9                 # importance.total = 0 のノード
+SIZE_SPAN = 0.5                 # importance.total = 1 で 1.4 になる幅
+SIZE_ISA_PARENT_BONUS = 0.1     # isa の親側 (上位概念) はもう少し大きく
+SIZE_SCALE_MAX = 1.4            # 係数の上限
+SIZE_W_MAX = 420                # 幅の絶対上限 (NODE_W_MAX 300 × 1.4 と一致する保険)
+SIZE_AGGREGATE = 1.15           # 集約ノードは重要度ではなくメンバー数の代弁 (固定)
+
+# --- §5 島ティント (アプリのトークン系の超淡色・順序固定) ---
+# 藍 / 桃 / 緑 / 琥珀 / 空 / 土 / 苔 / 紅。community_id の正準順 (辞書順) で巡回。
+# ギャップ島は「まだ埋まっていない」ことを灰破線で示す枠なので**ティントしない**。
+ISLAND_TINTS: tuple[str, ...] = (
+    "#F4F2FE", "#FDF1F5", "#EFF8F3", "#FFF8EC",
+    "#F0F7FB", "#F7F3EE", "#F4F6F0", "#FBF2F2",
+)
 
 
 # --------------------------------------------------------------------------
 # エンジン選択
 # --------------------------------------------------------------------------
 
+_warned_engine_values: set[str] = set()
+
+
 def engine_name() -> str:
-    """`CC_LAYOUT_ENGINE` を**呼び出し時に**読む (テストで monkeypatch できる)。"""
-    raw = (os.environ.get(ENGINE_ENV) or ENGINE_GRID).strip().lower()
-    return ENGINE_SEMANTIC if raw == ENGINE_SEMANTIC else ENGINE_GRID
+    """`CC_LAYOUT_ENGINE` を**呼び出し時に**読む (テストで monkeypatch できる)。
+
+    L3 で既定は semantic。旧挙動へ戻す安全弁は `CC_LAYOUT_ENGINE=grid` **だけ**で、
+    未設定・空・未知の値はすべて既定 (semantic) になる。安全弁を綴り間違えたまま
+    使い続けるのが一番まずいので、未知の値は 1 度だけ警告に出す (黙らない)。
+    """
+    raw = (os.environ.get(ENGINE_ENV) or "").strip().lower()
+    if raw in (ENGINE_GRID, ENGINE_SEMANTIC):
+        return raw
+    if raw and raw not in _warned_engine_values:
+        _warned_engine_values.add(raw)
+        logger.warning("%s=%r is not a known engine; using %r",
+                       ENGINE_ENV, raw, ENGINE_DEFAULT)
+    return ENGINE_DEFAULT
 
 
 def semantic_enabled() -> bool:
@@ -153,6 +188,63 @@ def _unit(dx: float, dy: float) -> tuple[float, float]:
     if d < _EPS:
         return (1.0, 0.0)
     return (dx / d, dy / d)
+
+
+# --------------------------------------------------------------------------
+# §4 サイズ / §5 ティント
+# --------------------------------------------------------------------------
+
+def _importance_total(node: dict[str, Any]) -> float:
+    """ノードに載っている importance.total を 0..1 に収めて返す (欠損は 0)。
+
+    importance は `detail._level_kg` が生成時に付ける (§4 の配管)。
+    `compute_layout` を素の KG で直接呼ぶ経路 (CLI の単発描画・テスト) には
+    無いので、その場合は全ノードが基準倍率 0.9 になる。
+    """
+    imp = node.get("importance")
+    if not isinstance(imp, dict):
+        return 0.0
+    try:
+        return min(1.0, max(0.0, float(imp.get("total", 0.0))))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _size_scale(node: dict[str, Any], isa_parents: frozenset[str]) -> float:
+    """§4 の係数。集約は 1.15 固定、それ以外は重要度 + isa 親ボーナス。"""
+    if node.get(AGGREGATE_MARK):
+        return SIZE_AGGREGATE
+    scale = SIZE_BASE + SIZE_SPAN * _importance_total(node)
+    if node["id"] in isa_parents:
+        scale += SIZE_ISA_PARENT_BONUS
+    return min(scale, SIZE_SCALE_MAX)
+
+
+def _scaled_sizes(kg_nodes: list[dict[str, Any]],
+                  edges: list[dict[str, Any]]) -> dict[str, tuple[int, int]]:
+    """§4: node_size() の基本寸法に重要度の係数を掛けた (幅, 高さ)。
+
+    幅・高さに**同じ**係数を掛けるので縦横比は変わらない (楕円が歪まない)。
+    幅の絶対上限は 420 = NODE_W_MAX(300) × 1.4 なので通常は効かないが、
+    node_size() のクランプを緩めたときの保険として残す。
+    """
+    isa_parents = frozenset(e["to"] for e in edges if e["glyph"] == "isa")
+    sizes: dict[str, tuple[int, int]] = {}
+    for n in kg_nodes:
+        w, h = node_size(n["label"])
+        scale = _size_scale(n, isa_parents)
+        sizes[n["id"]] = (min(SIZE_W_MAX, round(w * scale)), round(h * scale))
+    return sizes
+
+
+def _tint_map(community_ids: Iterable[str]) -> dict[str, str]:
+    """§5: community_id の正準順 (辞書順) でパレットを巡回割当する。
+
+    索引は**ギャップ島も数えたうえの**通し番号にする。こうすると隣にギャップ島が
+    増減しても他の島の色が動かない (レベルを切り替えても島の色が保たれる)。
+    """
+    return {cid: ISLAND_TINTS[i % len(ISLAND_TINTS)]
+            for i, cid in enumerate(sorted(set(community_ids)))}
 
 
 # --------------------------------------------------------------------------
@@ -656,6 +748,7 @@ def _place_from_centers(members: list[dict[str, Any]],
 def _grid_island(members: list[dict[str, Any]],
                  island_edges: list[dict[str, Any]],
                  cid: str, meta: dict[str, Any], detail_level: str,
+                 sizes: dict[str, tuple[float, float]],
                  ) -> tuple[list[dict[str, Any]], tuple[int, int]]:
     """その島だけ grid で組む (§2 の最終フォールバック)。
 
@@ -668,7 +761,7 @@ def _grid_island(members: list[dict[str, Any]],
         "edges": island_edges,
         "communities": [dict(meta, id=cid)] if meta else [{"id": cid, "name": cid}],
     }
-    sub = _compute_layout_grid(sub_kg, detail_level=detail_level)
+    sub = _compute_layout_grid(sub_kg, detail_level=detail_level, sizes=sizes)
     bx0, by0, bx1, by1 = sub["islands"][0]["bbox"]
     nodes_out = []
     for n in sub["nodes"]:
@@ -720,9 +813,11 @@ def compute_layout_v3(kg: dict[str, Any],
     for n in kg_nodes:
         groups.setdefault(n.get("community_id") or "comm_default", []).append(n)
 
-    sizes = {n["id"]: node_size(n["label"]) for n in kg_nodes}
+    # §4: 基本寸法 (ラベル適合) × 重要度の係数。grid 経路のサイズは不変。
+    sizes = _scaled_sizes(kg_nodes, edges_out)
     community_of = {n["id"]: (n.get("community_id") or "comm_default")
                     for n in kg_nodes}
+    tints = _tint_map(groups)
 
     # --- 1) 島ごとに中身を組む (座標は島原点からの相対) ---
     laid: list[tuple[str, list[dict[str, Any]], tuple[int, int], str, int]] = []
@@ -746,7 +841,7 @@ def compute_layout_v3(kg: dict[str, Any],
         if placed.centers is None:
             logger.warning("island %s (%s): %s; grid fallback", cid, kind, placed.fail)
             island_nodes, size = _grid_island(
-                members, island_edges, cid, meta, detail_level)
+                members, island_edges, cid, meta, detail_level, sizes)
             mode = _FAIL_TO_MODE.get(placed.fail or "", MODE_GRID_FALLBACK)
         else:
             island_nodes, size = _place_from_centers(
@@ -771,14 +866,18 @@ def compute_layout_v3(kg: dict[str, Any],
             node["x"] += x0
             node["y"] += y0
             nodes_out.append(node)
-        islands_out.append({
+        is_gap = bool(communities.get(cid, {}).get("is_gap", False))
+        island = {
             "community_id": cid,
             "name": communities.get(cid, {}).get("name", cid),
             "bbox": [x0, y0, x0 + size[0], y0 + size[1]],
-            "is_gap": bool(communities.get(cid, {}).get("is_gap", False)),
-            "layout_mode": mode,
-            "sweeps": sweeps,
-        })
+            "is_gap": is_gap,
+        }
+        if not is_gap:                       # §5: ギャップ島は灰破線のまま
+            island["tint"] = tints[cid]
+        island["layout_mode"] = mode
+        island["sweeps"] = sweeps
+        islands_out.append(island)
 
     return {
         "detail_level": detail_level,

@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from cc_core.layout import compute_layout
@@ -53,8 +54,19 @@ def test_islands_do_not_overlap():
             assert _no_overlap(boxes[a], boxes[b])
 
 
-def test_islands_wrap_into_grid_when_many_communities():
-    """島が多いとき横一列に伸びず、行を折り返して bbox が重ならないこと。"""
+def test_many_islands_stay_compact_and_disjoint():
+    """島が多くても横一列に伸びず、重ならず、二次元に広がること。
+
+    元は grid の「行に折り返す」実装をそのまま写したテストだった
+    (レイアウト v3 §7)。semantic は行の概念を持たないパッキングなので、
+    エンジンに依らない不変条件へ一般化する:
+
+      1. 島 bbox どうしが重ならない
+      2. 総幅に上限がある (横一列に伸びていない)
+      3. 縦にも広がっている (= 一列ではない)
+
+    grid / semantic の両方で成り立つので、両方で回す。
+    """
     kg = {
         "graph_version": "kg_many",
         "nodes": [
@@ -64,12 +76,24 @@ def test_islands_wrap_into_grid_when_many_communities():
         "edges": [],
         "communities": [{"id": f"comm_{i:02d}", "name": f"island {i}"} for i in range(6)],
     }
-    plan = compute_layout(kg)
-    boxes = [i["bbox"] for i in plan["islands"]]
-    assert len(boxes) == 6
-    for a in range(len(boxes)):
-        for b in range(a + 1, len(boxes)):
-            assert _no_overlap(boxes[a], boxes[b])
-    total_width = max(b[2] for b in boxes) - min(b[0] for b in boxes)
-    assert total_width < 3000, f"islands still laid out in one long row ({total_width}px)"
-    assert len({b[1] for b in boxes}) > 1, "expected more than one island row"
+    for engine in ("semantic", "grid"):
+        os.environ["CC_LAYOUT_ENGINE"] = engine
+        try:
+            plan = compute_layout(kg)
+        finally:
+            os.environ.pop("CC_LAYOUT_ENGINE", None)
+        boxes = [i["bbox"] for i in plan["islands"]]
+        assert len(boxes) == 6
+
+        for a in range(len(boxes)):
+            for b in range(a + 1, len(boxes)):
+                assert _no_overlap(boxes[a], boxes[b]), engine
+
+        total_width = max(b[2] for b in boxes) - min(b[0] for b in boxes)
+        total_height = max(b[3] for b in boxes) - min(b[1] for b in boxes)
+        # 6 島が一列に並べば総幅は「全島の幅の合計 + 隙間」以上になる。
+        # それ未満なら一列ではない (実装が何行に折るかには触れない)。
+        assert total_width < sum(b[2] - b[0] for b in boxes), \
+            f"{engine}: 島が横一列に伸びている ({total_width}px)"
+        assert total_height > max(b[3] - b[1] for b in boxes), \
+            f"{engine}: 島が縦に広がっていない (実質 1 行)"

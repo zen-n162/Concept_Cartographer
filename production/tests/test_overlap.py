@@ -90,21 +90,57 @@ def test_node_size_is_clamped():
 
 # --- layout spacing ---
 
-def test_gap_between_adjacent_nodes_fits_edge_label():
-    """同一行の隣接ノード間のスキマが、そこに載るラベルより広いこと。"""
-    plan = compute_layout(_dense_kg())
-    nodes = {n["id"]: n for n in plan["nodes"]}
-    checked = 0
-    for e in plan["edges"]:
-        a, b = nodes[e["from"]], nodes[e["to"]]
-        if a["y"] != b["y"]:
-            continue
-        left, right = (a, b) if a["x"] < b["x"] else (b, a)
-        gap = right["x"] - (left["x"] + left["size"])
-        assert gap >= edge_label_px(e["label"], e["glyph"]), \
-            f"edge {e['id']}: スキマ {gap} < ラベル幅"
-        checked += 1
-    assert checked > 0, "同一行の隣接エッジが1本も無い"
+def test_every_labeled_edge_has_room_or_is_retreated(monkeypatch):
+    """全ラベル付きエッジで「両端の間隔 ≥ 必要長」か、プランナーが退避済みか。
+
+    元は「同一行の隣接ノード間のスキマがラベルより広いこと」という grid 前提の
+    テストだった (レイアウト v3 §7)。semantic は層状・木・KK で組むので「同じ行」
+    という概念が無い。エンジンに依らず守るべき不変条件はこちら:
+
+      ラベルは自然な中点にそのまま置けるだけの距離がある。無ければ
+      プランナーが逃がしてある (unresolved = 逃げ場なしは 1 本も出さない)。
+
+    「間隔」はエッジの向きに沿って測る (grid の「横のスキマ」を任意方向へ
+    一般化したもの)。楕円の半径は向きによって変わるので、その向きでの半径を
+    使って両端の楕円のあいだの実効的な空きを出す。
+
+    どちらのエンジンでも成り立つので、両方で回して二重に確かめる。
+    """
+    def _radius_towards(node: dict, ux: float, uy: float) -> float:
+        """楕円中心から (ux, uy) 方向の縁までの距離。"""
+        rx, ry = node["size"] / 2, node["height"] / 2
+        return 1.0 / math.hypot(ux / rx, uy / ry)
+
+    for engine in ("semantic", "grid"):
+        monkeypatch.setenv("CC_LAYOUT_ENGINE", engine)
+        plan = compute_layout(_dense_kg())
+        nodes = {n["id"]: n for n in plan["nodes"]}
+        clear_label_plan_cache()
+        placements = plan_label_layout(plan)
+
+        checked = 0
+        for e in plan["edges"]:
+            if not e.get("label"):
+                continue
+            checked += 1
+            a, b = nodes[e["from"]], nodes[e["to"]]
+            dx = (b["x"] + b["size"] / 2) - (a["x"] + a["size"] / 2)
+            dy = (b["y"] + b["height"] / 2) - (a["y"] + a["height"] / 2)
+            span = math.hypot(dx, dy)
+            assert span > 0, f"{engine}: edge {e['id']} の両端が同じ位置にある"
+            ux, uy = dx / span, dy / span
+            free = span - _radius_towards(a, ux, uy) - _radius_towards(b, -ux, -uy)
+            if free >= edge_label_px(e["label"], e["glyph"]):
+                continue                       # 中点にそのまま置ける
+            p = placements.get(e["id"])
+            assert p is not None and p.retreated, (
+                f"{engine}: edge {e['id']} は空き {free:.0f}px がラベル幅"
+                f"{edge_label_px(e['label'], e['glyph']):.0f}px に足りないのに"
+                f"退避もしていない")
+        assert checked > 0, f"{engine}: ラベル付きエッジが 1 本も無い"
+        assert not any(p.unresolved for p in placements.values()), \
+            f"{engine}: 逃げ場の無いラベルが残った"
+    clear_label_plan_cache()
 
 
 def test_dense_layout_has_no_label_overlap():

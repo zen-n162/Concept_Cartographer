@@ -108,10 +108,13 @@ def build_svg(plan: dict[str, Any], *, rough: bool = True) -> str:
         is_gap = bool(isl.get("is_gap"))
         color = "#868e96" if is_gap else "#495057"
         op = GAP_OPACITY / 100 if is_gap else 1.0
+        # レイアウト v3 §5: 島の淡い地色。ギャップ島 (と grid エンジンの plan)
+        # には tint が無いので従来どおり塗らない。
+        fill = _esc(isl.get("tint") or "none")
         parts.append(
             f'<g data-island-id="{_esc(isl["community_id"])}"{grp}>'
             f'<rect x="{ix0 + ox:.0f}" y="{iy0 + oy:.0f}" '
-            f'width="{ix1 - ix0:.0f}" height="{iy1 - iy0:.0f}" rx="12" fill="none" '
+            f'width="{ix1 - ix0:.0f}" height="{iy1 - iy0:.0f}" rx="12" fill="{fill}" '
             f'stroke="{color}" stroke-width="1" opacity="{op:.2f}"'
             f'{_dash("dashed" if is_gap else "solid", 1)}/></g>'
         )

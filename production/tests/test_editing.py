@@ -540,3 +540,49 @@ def test_reconcile_survives_plan_without_level_plans(workdir):
     append_edit(session, {"op": "rename_node", "target": "c001",
                           "payload": {"label": "改名"}})
     assert _glyph_of(rebuild_session(session), "r000") == "wave"
+
+
+# -------------------------------------------------- レイアウト v3 (§8-1)
+
+def test_rebuild_uses_the_semantic_engine_end_to_end(workdir, monkeypatch) -> None:
+    """編集経路 (rebuild_session) が v3 でそのまま動くこと。
+
+    editing.py は無変更のまま build_multilevel_plan 経由で v3 に乗る (設計書 §6)。
+    再構成後も重なりゼロ・島の中に収まる、が守られていることまで見る。
+    エンジンは既定に頼らず明示する — 安全弁 (=grid) を立てて全スイートを
+    回したときにも意味のあるテストにするため。
+    """
+    from cc_core.detail import project
+    from cc_core.layout_v3 import ISLAND_TINTS, LAYOUT_ENGINE_ID
+    from cc_core.overlap import check_overlaps, clear_label_plan_cache
+
+    monkeypatch.setenv("CC_LAYOUT_ENGINE", "semantic")
+    setup_session()
+    append_edit(SESSION, {"op": "rename_node", "target": "c000",
+                          "payload": {"label": "意味的配置で組み直された概念"}})
+    plan = rebuild_session(SESSION)
+
+    assert plan["provenance"]["layout_engine"] == LAYOUT_ENGINE_ID
+    for level in ("overview", "standard", "detailed"):
+        islands = plan["_level_plans"][level]["islands"]
+        assert all(i["layout_mode"] == "semantic" for i in islands)
+        assert all(i["tint"] in ISLAND_TINTS for i in islands if not i["is_gap"])
+        clear_label_plan_cache()
+        report = check_overlaps(project(plan, level))
+        assert not report.node_on_node and not report.node_outside_island
+
+
+def test_rename_size_growth_survives_the_importance_factor(workdir) -> None:
+    """v3 のサイズ係数は**乗算**なので「改名 → 大きくなる」は保たれる (§4)。
+
+    重要度が同じままラベルだけ伸びれば、基本寸法が伸びたぶん必ず大きくなる。
+    """
+    setup_session()
+    plan0 = json.loads(editing.plan_file(SESSION).read_text(encoding="utf-8"))
+    before = detailed_nodes(plan0)["c000"]
+    append_edit(SESSION, {"op": "rename_node", "target": "c000",
+                          "payload": {"label": "非常に長い概念名をつけた場合の"
+                                               "レイアウト再計算の確認用ラベル"}})
+    after = detailed_nodes(rebuild_session(SESSION))["c000"]
+    assert after["size"] > before["size"]
+    assert after["height"] >= before["height"]

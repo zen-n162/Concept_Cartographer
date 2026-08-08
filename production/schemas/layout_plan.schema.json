@@ -454,6 +454,11 @@
             "type": "boolean",
             "default": false
           },
+          "tint": {
+            "type": "string",
+            "pattern": "^#[0-9A-F]{6}$",
+            "description": "レイアウト v3 §5: 島の淡い地色 (community_id 正準順でパレットを巡回)。ギャップ島には付かない (灰破線のまま)。grid エンジンではこのキー自体を付けない。"
+          },
           "layout_mode": {
             "type": "string",
             "enum": [

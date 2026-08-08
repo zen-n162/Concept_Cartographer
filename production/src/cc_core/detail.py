@@ -25,7 +25,8 @@ from cc_core.community import (
     analyze,
 )
 from cc_core.island_packing import anchors_from_plan
-from cc_core.layout import compute_layout
+from cc_core.layout import AGGREGATE_MARK, compute_layout
+from cc_core.layout_v3 import LAYOUT_ENGINE_ID
 from cc_core.logging_util import get_logger
 
 logger = get_logger("cc_core.detail")
@@ -87,6 +88,10 @@ def _level_kg(
             "id": agg.id,
             "label": agg.summary_label,
             "community_id": agg.community_id,
+            # レイアウト v3 §4: 集約は重要度ではなくメンバー数を代弁するので
+            # サイズ係数を固定にする。この印はレイアウトが読んだあと捨てられ、
+            # plan には出ない (layout.AGGREGATE_MARK の説明を参照)。
+            AGGREGATE_MARK: True,
         })
         for m in agg.member_node_ids:
             agg_ids[m] = agg.id
@@ -236,7 +241,13 @@ def build_multilevel_plan(
     base["levels"] = level_stats
     base["aggregates"] = [all_aggregates[k] for k in sorted(all_aggregates)]
     base["_level_plans"] = {lv: level_plans[lv] for lv in LEVEL_ORDER}
-    base["provenance"]["layout_engine"] = "cc_core.detail/1.0 multilevel"
+    # レイアウト v3 §6: semantic で組んだときは base も同じエンジン名に揃える
+    # (「この plan はどのエンジンで描かれたか」を 1 か所で判定できるようにする)。
+    # grid 経路は従来の "cc_core.detail/1.0 multilevel" のまま。
+    semantic = all(p["provenance"].get("layout_engine") == LAYOUT_ENGINE_ID
+                   for p in level_plans.values())
+    base["provenance"]["layout_engine"] = (
+        LAYOUT_ENGINE_ID if semantic else "cc_core.detail/1.0 multilevel")
     if language:
         base["provenance"]["language"] = language
 

@@ -472,10 +472,11 @@
 <div class="scroll">
 <table>
   <tr><th>場所</th><th>コンポーネント</th><th>役割</th></tr>
-  <tr><td rowspan="6">この Mac</td><td>Web アプリ (cc_web)</td><td>FastAPI :8090 + 素の HTML/CSS/JS。CLI と同じパイプラインの薄いラッパ</td></tr>
+  <tr><td rowspan="7">この Mac</td><td>Web アプリ (cc_web)</td><td>FastAPI :8090 + 素の HTML/CSS/JS。CLI と同じパイプラインの薄いラッパ</td></tr>
   <tr><td>CLI (cc_orchestrator.chat)</td><td>同機能をコマンドラインで。全機能は常に両面実装</td></tr>
   <tr><td>pipeline.py</td><td>⓪〜⑧ の段取りと QA 3 経路。LLM 呼び出しはここが束ねる (上限 knob つき)</td></tr>
   <tr><td>cc_core</td><td>決定的コア: 正規化・記号投影・詳細度・ギャップ・ラベル配置・編集・学習・検証合成・評価</td></tr>
+  <tr><td>レイアウトエンジン v3 (layout_v3 / island_packing)</td><td>島の中身は関係の種類で組み方を変える (因果 = 左→右の層 / 分類 = 木 / その他 = 近接配置)。島どうしは関係の強さで寄せて詰め、レベルを跨いで同じ方位を保つ。島は淡い色分け、ノードは重要度で 0.9〜1.4 倍。乱数なし。制約が解けない島だけ旧グリッドへ退避し、件数を実行サマリに出す</td></tr>
   <tr><td>cc_store</td><td>セッション横断の SQLite 索引 + コーパスグラフ (QA と Gap Report の材料。派生キャッシュ)</td></tr>
   <tr><td>描画面</td><td>layout_plan.json 中間契約 → Excalidraw MCP gateway :8000 → canvas :3000 / またはファイル直接生成。<b>描画前に gateway の /healthz を 3 秒で確認し、不達ならファイル生成へ自動で切り替える</b> (切替は警告として表示)。MCP 接続そのものにも 10 秒の上限があり、半死のゲートウェイで待ち続けない</td></tr>
   <tr><td rowspan="3">クラウド</td><td>Microsoft Foundry</td><td>エージェント 4 体 (抽出 sol / 分析 sol / 検証 terra / 描画指揮 luna)。抽出と検証は別モデル</td></tr>
@@ -487,7 +488,7 @@
 <div class="note">この構成の設計原則 — <b>LLM は判断が要るところだけ</b> (読む・抜く・検証する)。構造化・レイアウト・記号変換・再構成は決定的コードが担い、同じ入力からは必ず同じ地図が出ます。詳しい処理の流れは <a class="backlink" href="overview.html#how">説明ページの「しくみ」</a> へ。</div>
 
 <footer>
-  この構成図は <b>抽出 v2 + レスポンシブ + 描画フォールバック (2026-08-08) 時点</b>の実装に基づきます。機能追加・仕様変更の際にこのページも更新されます。<br>
+  この構成図は <b>抽出 v2 + レスポンシブ + 描画フォールバック + レイアウト v3 (意味的配置) (2026-08-08) 時点</b>の実装に基づきます。機能追加・仕様変更の際にこのページも更新されます。<br>
   <a class="backlink" href="overview.html">← 説明ページ</a> ・ <a class="backlink" href="/">Web アプリへ</a>
 </footer>
 
